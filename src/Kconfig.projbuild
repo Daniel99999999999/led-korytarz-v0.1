@@ -1,0 +1,41 @@
+menu "Sterownik LED"
+
+config LED_CONTROLLER_AT24C08
+    bool "Szyfrowane ustawienia w AT24C08N"
+    default n
+    select MBEDTLS_AES_C
+    select MBEDTLS_GCM_C
+    help
+        Wlacza sterownik AT24C08N, format dwoch slotow i AES-256-GCM.
+        Pozostaw wylaczone, dopoki EEPROM nie jest zamontowany na PCB.
+
+config LED_CONTROLLER_IR_NEC
+    bool "Odbiornik pilota NEC Extended na GPIO36"
+    default n
+    help
+        Wlacza odbior przez RMT RX dla pilota o adresie 0x87 0x5A.
+        Pozostaw wylaczone, dopoki odbiornik IR i zewnetrzny pull-up nie sa zamontowane.
+
+config LED_CONTROLLER_INA228
+    bool "Telemetria z INA228 na wspolnej magistrali I2C"
+    default n
+    help
+        Wlacza wykrywanie i odczyt INA228 pod adresem 0x40 z ograniczonym timeoutem.
+        Brak ukladu jest dozwolony i nie zatrzymuje LCD ani sterowania lokalnego.
+
+config LED_CONTROLLER_DS18B20
+    bool "Czujniki temperatury DS18B20 na GPIO4"
+    default n
+    help
+        Wlacza wielourzadzeniowa magistrale 1-Wire na GPIO4 dla czujnikow
+        radiatora i obudowy. Wymaga zewnetrznego pull-up 4,7 kOhm do 3,3 V.
+        Brak czujnikow jest dozwolony i nie zatrzymuje sterowania lokalnego.
+
+config LED_CONTROLLER_DS1307_NVRAM
+    bool "Konfiguracja KEY/PIR w NVRAM DS1307"
+    default n
+    help
+        Wlacza tylko pamiec 56 B pod adresem I2C 0x68; nie zmienia rejestrow zegara.
+        Brak ukladu oznacza prace w RAM. Podtrzymanie wymaga sprawnej baterii VBAT.
+
+endmenu

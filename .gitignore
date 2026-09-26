@@ -1,0 +1,47 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# ESP-IDF generated configuration/build
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.*
+!sdkconfig.defaults
+!sdkconfig.esp32doit-devkit-v1
+managed_components/
+dependencies.lock
+
+# Local secrets
+secrets.*
+!secrets.example.*
+include/Secrets.hpp
+include/WifiCredentials.hpp
+keys/
+provisioning/private/
+provisioning/*.bin
+provisioning/*.json
+!provisioning/*.example.json
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.code-workspace
+
+# OS and temporary files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Test output
+coverage/
+*.gcda
+*.gcno
+*.gcov
+__pycache__/
+*.pyc
+*.log

@@ -1,0 +1,54 @@
+# Architektura
+
+Dokument odtworzony dla bieżącego kodu; poprzedniej wersji brakowało w dostarczonej kopii.
+
+`LedController` jest jedynym właścicielem LEDC i stanu kanałów. Próbkuje wejścia co 5 ms,
+rozpoznaje gesty, wykonuje komendy i timery PIR, aktualizuje fade oraz karmi watchdog.
+Przypisanie KEY jest mapą logiczną; aktualizacja każdego PWM jest niezależna od mapy przycisków.
+Regulacja grupy zamraża maskę kanałów do zakończenia gestu.
+
+MQTT i IR przekazują komendy przez statyczną kolejkę (10 elementów), bez dostępu do LEDC.
+Nowe komendy zmieniają pojedyncze ustawienie KEY/PIR/LCD lub odtwarzają cały rekord NVRAM.
+Odtwarzanie jest przyjmowane tylko przed pierwszą zmianą konfiguracji w RAM.
+Sterowanie lokalne nie zależy od Wi-Fi, MQTT, odczytu pamięci ani OTA.
+
+`LcdService` jest jedynym właścicielem I2C0. Otrzymuje kopię stanu oraz konfiguracji
+przez jednoelementową kolejkę nadpisującą. Obsługuje LCD i opcjonalnie EEPROM, INA228,
+DS1307 NVRAM oraz usługę temperatury. `Ds1307Nvram` wykonuje najwyżej jedną transakcję
+na obieg usługi, z timeoutem. NACK pozostaje lokalny; timeout resetuje automat wspólnej
+magistrali, zachowując uchwyty innych klientów.
+
+NVRAM jest oddzielona od `SettingsService` i payloadu EEPROM-u. Dwa rekordy CRC/commit
+przechowują wyłącznie pięć masek KEY, dwa czasy PIR, tryb LCD i czas przycisku. Stany świateł i jasność pozostają w RAM.
+Nie dodano mutexów blokujących kontroler ani operacji I2C w jego zadaniu.
+
+MQTT publikuje różnicowo 27 pól migawki (zależnie od włączonych funkcji), z pełną
+synchronizacją po reconnect/birth HA. Konfiguracja ma dziesięć nowych pól trackera.
+PWM podczas ON/OFF nie generuje dodatkowych wartości jasności w MQTT; LCD odróżnia
+przejście ON/OFF od regulacji jasności.
+
+Szczegóły priorytetów, NVRAM, tematów MQTT i testów: [LOCAL_CONTROL.md](LOCAL_CONTROL.md).
+
+BacklightPolicy działa w kontrolerze; żądany stan podświetlenia przekazuje atomowo do LcdService.
+LcdDisplay sprawdza jeden znak DDRAM co 125 ms i korzysta z istniejącego recovery po błędzie.
+Bufor discovery ma 16 KiB, limit outboxu 32 KiB (limit, nie stała alokacja).
+Szczegóły: [LCD_CONTROL.md](LCD_CONTROL.md).
+
+## Debug MQTT v0.8.1
+
+DebugLog instaluje kopię wyjścia ESP_LOG przy starcie app_main; domyślnie przechwytywanie
+jest wyłączone. Nie czeka na zajęty bufor i nigdy nie wykonuje MQTT w kontekście producenta logu.
+Model DebugBuffer ma stałą pojemność i limit sesji. Eksport i wygaszanie sesji obsługuje
+MqttService, budzony najwyżej po 200 ms także offline. Telemetria diagnostyczna co 10 s
+jest niezależna od migawki kanałów. Debug nie zmienia NVRAM ani istniejącego trackera pól.
+Szczegóły i ograniczenia: [DEBUG_MQTT.md](DEBUG_MQTT.md).
+
+## Start sieci v0.8.2
+
+WifiService publikuje atomowy znacznik gotowości po GOT_IP, ustawieniu DNS i logu runtime.
+Kasuje go przy disconnect/apply, zdarzeniu rozłączenia i LOST_IP. MqttService tworzy klienta
+przy apply, a jego zadanie wywołuje start po gotowości sieci. client_mutex chroni uchwyt,
+stan startu i retry przed clear/disconnect/apply. Stop klienta, który jeszcze nie wystartował,
+pomija esp_mqtt_client_stop i niszczy uchwyt. Udany start nie jest powtarzany na GOT_IP;
+ponowne połączenia obsługuje ESP-MQTT. Zanik sieci może nastąpić także po sprawdzeniu
+znacznika; zwykła obsługa błędów transportu pozostaje aktywna.

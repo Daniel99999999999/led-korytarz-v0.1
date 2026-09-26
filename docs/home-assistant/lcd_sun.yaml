@@ -1,0 +1,39 @@
+blueprint:
+  name: Sterownik LED - noc LCD wedlug slonca
+  description: Synchronizuje noc LCD po zachodzie/wschodzie, restarcie HA i powrocie sterownika.
+  domain: automation
+  input:
+    base_topic:
+      name: Bazowy temat MQTT sterownika
+      description: Topic prefix/device ID, bez ukosnika na koncu; odczytaj z mqtt status.
+      selector:
+        text: {}
+trigger_variables:
+  base: !input base_topic
+variables:
+  base: !input base_topic
+triggers:
+  - trigger: state
+    entity_id: sun.sun
+    to: "below_horizon"
+  - trigger: state
+    entity_id: sun.sun
+    to: "above_horizon"
+  - trigger: homeassistant
+    event: start
+  - trigger: event
+    event_type: automation_reloaded
+  - trigger: mqtt
+    topic: "{{ base ~ '/availability' }}"
+    payload: "online"
+conditions:
+  - condition: template
+    value_template: "{{ states('sun.sun') in ['above_horizon', 'below_horizon'] }}"
+actions:
+  - action: mqtt.publish
+    data:
+      topic: "{{ base ~ '/lcd/night/set' }}"
+      payload: "{{ 'ON' if is_state('sun.sun', 'below_horizon') else 'OFF' }}"
+      qos: 1
+      retain: false
+mode: restart

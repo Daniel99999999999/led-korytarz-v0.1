@@ -1,0 +1,58 @@
+# Krótki interwał odpytywania przycisków i dokładny debounce.
+CONFIG_FREERTOS_HZ=1000
+
+# Logi podczas uruchamiania układu.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# Testowa konfiguracja Wi-Fi nie moze trafic do wewnetrznego NVS.
+# Firmware dodatkowo wymusza WIFI_STORAGE_RAM i nvs_enable=0 w runtime.
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+
+# Task watchdog jest aktywny od startu; firmware wymusza też tę konfigurację runtime.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+
+# Aktualny target esp32doit-devkit-v1 ma 4 MB flash.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Dwa sloty aplikacji po 1856 KiB. NVS zachowuje dotychczasowy adres 0x9000.
+# PlatformIO wybiera te sama tabele dodatkowo przez board_build.partitions.
+CONFIG_PARTITION_TABLE_SINGLE_APP=n
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=n
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota_4mb.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_ota_4mb.csv"
+
+# Dwa sloty OTA z automatycznym rollbackiem po nieudanym pierwszym starcie.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# OTA akceptuje tylko HTTPS i weryfikuje serwer publicznym zestawem CA.
+CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=n
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# Testowy broker LAN uzywa mqtt://. Nie kompilujemy nieuzywanych transportow,
+# dopoki nie zostanie ustalone zrodlo CA dla mqtts://.
+CONFIG_MQTT_PROTOCOL_5=n
+CONFIG_MQTT_TRANSPORT_SSL=n
+CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
+CONFIG_MQTT_TRANSPORT_WEBSOCKET_SECURE=n
+
+# Projekt nie używa wyjątków ani RTTI.
+CONFIG_COMPILER_CXX_EXCEPTIONS=n
+CONFIG_COMPILER_CXX_RTTI=n
+
+# AT24C08N nie jest jeszcze zamontowany. Opcja wlacza rowniez AES-GCM.
+CONFIG_LED_CONTROLLER_AT24C08=n
+CONFIG_LED_CONTROLLER_IR_NEC=n
+CONFIG_LED_CONTROLLER_INA228=n
+CONFIG_LED_CONTROLLER_DS18B20=n
+
+CONFIG_LED_CONTROLLER_DS1307_NVRAM=n
