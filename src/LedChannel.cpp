@@ -25,7 +25,7 @@ esp_err_t LedChannel::initializePeripheral() noexcept {
     timer_config.duty_resolution = board_config::kPwmResolution;
     timer_config.timer_num = board_config::kLedcTimer;
     timer_config.freq_hz = board_config::kPwmFrequencyHz;
-    timer_config.clk_cfg = LEDC_AUTO_CLK;
+    timer_config.clk_cfg = LEDC_USE_APB_CLK;
     timer_config.deconfigure = false;
 
     esp_err_t result = ledc_timer_config(&timer_config);
@@ -33,6 +33,12 @@ esp_err_t LedChannel::initializePeripheral() noexcept {
         return result;
     }
 
+    for (const auto timer : {board_config::kChannel4Timer, board_config::kChannel5Timer}) {
+        timer_config.timer_num = timer;
+        result = ledc_timer_config(&timer_config);
+        if (result != ESP_OK)
+            return result;
+    }
     peripheral_initialized_ = true;
     ESP_LOGI(kTag, "LEDC: %" PRIu32 " Hz, rozdzielczosc 12 bitow", board_config::kPwmFrequencyHz);
     return ESP_OK;
@@ -62,7 +68,7 @@ esp_err_t LedChannel::initialize() noexcept {
     channel_config.gpio_num = static_cast<int>(pwm_pin_);
     channel_config.speed_mode = board_config::kLedcSpeedMode;
     channel_config.channel = channel_;
-    channel_config.timer_sel = board_config::kLedcTimer;
+    channel_config.timer_sel = timer();
     channel_config.duty = 0;
     channel_config.hpoint = 0;
     channel_config.sleep_mode = LEDC_SLEEP_MODE_NO_ALIVE_NO_PD;
@@ -82,6 +88,34 @@ esp_err_t LedChannel::initialize() noexcept {
     ESP_LOGI(kTag, "%s: GPIO %d, kanal LEDC %d, start OFF", name_, static_cast<int>(pwm_pin_),
              static_cast<int>(channel_));
     return ESP_OK;
+}
+
+ledc_timer_t LedChannel::timer() const noexcept {
+    return channel_ == LEDC_CHANNEL_3   ? board_config::kChannel4Timer
+           : channel_ == LEDC_CHANNEL_4 ? board_config::kChannel5Timer
+                                        : board_config::kLedcTimer;
+}
+esp_err_t LedChannel::configurePwm(const pwm_config::Config& config) noexcept {
+    if (!pwm_config::valid(config) || (channel_ != LEDC_CHANNEL_3 && channel_ != LEDC_CHANNEL_4))
+        return ESP_ERR_INVALID_ARG;
+    if (operationalStatus() != ESP_OK)
+        return operationalStatus();
+    if (pwm_config::equal(config, pwm_))
+        return ESP_OK;
+    // Blank this output while changing its private timer; no other channel is touched.
+    esp_err_t result = ledc_stop(board_config::kLedcSpeedMode, channel_, 0);
+    if (result != ESP_OK)
+        return latchOutputFault(result);
+    if (config.frequency_hz != pwm_.frequency_hz) {
+        result = ledc_set_freq(board_config::kLedcSpeedMode, timer(), config.frequency_hz);
+        if (result != ESP_OK)
+            return latchOutputFault(result);
+    }
+    pwm_ = config;
+    if (pwm_.on_off)
+        transition_.reset(state_.targetDuty(board_config::kPwmMaxDuty), 0);
+    applied_duty_ = UINT32_MAX; // force update after ledc_stop, including duty zero
+    return synchronize();
 }
 
 esp_err_t LedChannel::turnOn(const std::uint32_t now,
@@ -216,7 +250,7 @@ esp_err_t LedChannel::operationalStatus() const noexcept {
 esp_err_t LedChannel::scheduleTarget(const std::uint32_t duty,
                                      const std::uint32_t transition_duration,
                                      const std::uint32_t now) noexcept {
-    static_cast<void>(transition_.retarget(duty, transition_duration, now));
+    static_cast<void>(transition_.retarget(duty, pwm_.on_off ? 0U : transition_duration, now));
     return synchronize();
 }
 
@@ -226,7 +260,7 @@ esp_err_t LedChannel::synchronize() noexcept {
         return status;
     }
 
-    const std::uint32_t requested_duty = transition_.currentDuty();
+    const std::uint32_t requested_duty = pwm_config::constrain(transition_.currentDuty(), pwm_);
     if (requested_duty == applied_duty_) {
         return ESP_OK;
     }

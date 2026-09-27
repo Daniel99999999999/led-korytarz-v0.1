@@ -2,6 +2,7 @@
 
 #include "ChannelState.hpp"
 #include "DutyTransition.hpp"
+#include "PwmConfig.hpp"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_err.h"
@@ -16,6 +17,7 @@ class LedChannel final {
 
     esp_err_t prepareOutputLow() noexcept;
     esp_err_t initialize() noexcept;
+    esp_err_t configurePwm(const pwm_config::Config& config) noexcept;
     esp_err_t turnOn(std::uint32_t now, std::uint32_t transition_duration) noexcept;
     esp_err_t turnOff(std::uint32_t now, std::uint32_t transition_duration) noexcept;
     esp_err_t toggle(std::uint32_t now, std::uint32_t transition_duration) noexcept;
@@ -40,6 +42,8 @@ class LedChannel final {
     esp_err_t synchronize() noexcept;
     esp_err_t latchOutputFault(esp_err_t error) noexcept;
 
+    ledc_timer_t timer() const noexcept;
+    pwm_config::Config pwm_{};
     const char* name_;
     gpio_num_t pwm_pin_;
     ledc_channel_t channel_;

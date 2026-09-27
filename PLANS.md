@@ -889,3 +889,29 @@ Podsumuj wynik, dług techniczny i następny krok.
 - [ ] Osobny hosting HTTPS dla OTA; prywatne Releases wymagają autoryzacji.
 
 Nie zmieniano firmware; test sprzętowy i ponowna kompilacja nie są wymagane dla tego etapu.
+
+## 2026-09-27 — publiczne repozytorium wydań OTA
+
+- [x] Użytkownik zatwierdził oddzielny publiczny hosting wydań binarnych.
+- [x] Utworzono Daniel99999999999/led-korytarz-firmware przez GitHub API;
+  odpowiedź potwierdza visibility=public. Użyto istniejącego logowania Git bez wypisywania tokenu.
+- [x] Uzupełniono docs/GITHUB.md; nie zmieniano firmware ani lokalnych danych MQTT.
+- [ ] Publikacja pierwszego firmware.bin (nowa wersja), konfiguracja URL i test OTA na ESP32.
+- [ ] Automatyzacja publikacji GitHub Releases z VS Code (obecny uploader tylko pobiera i sprawdza plik).
+
+Walidacja: odpowiedź GitHub API i kontrola UTF-8; kompilacja niewymagana dla dokumentacji.
+
+## Aktywny etap v0.9.0 — PWM4/5 i serwisowe OTA AP
+
+Zakres zatwierdzony: niezależna częstotliwość, minimalne wypełnienie, minimalne ON/OFF,
+tryb PWM/ON-OFF kanałów 4/5; lokalny hotspot po 10 s przycisku LCD, 10 min sesji,
+strona uploadu, zachowanie konfiguracji STA oraz zdalnego MQTT/HTTPS OTA.
+
+- [x] Odczyt kontraktów i bazowa kontrola check.sh.
+- [ ] Model ograniczeń PWM, osobne timery i kolejka kontrolera.
+- [ ] HA discovery/komendy/publikacja i migracja rekordu DS1307 v1 -> v2.
+- [ ] AP, gest serwisowy, ekran danych dostępu, HTTP upload i wspólna blokada OTA.
+- [ ] Testy hostowe, kompilacja, dokumentacja i lista HIL.
+
+Nie zmieniać GPIO ani zapisanej sieci. Nie publikować wydania ani nie wgrywać urządzenia.
+Nie utożsamiać ustawień PWM z potwierdzeniem kompatybilności żarówek Diall.

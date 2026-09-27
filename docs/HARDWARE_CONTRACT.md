@@ -32,3 +32,10 @@ Szczegóły: [sterowanie lokalne](LOCAL_CONTROL.md),
 Odczyt DDRAM wymaga RW LCD do P1 PCF8574, D4–D7 do P4–P7; nie wolno zwierać RW do GND.
 Nie zmieniono GPIO, polaryzacji ani mapy PCF. Pętle walidacji BoardConfig używają indeksów
 ze względu na zgodność constexpr z kompilatorem hostowym Embarcadero.
+
+## v0.9.0 — PWM4/5
+
+Bez zmiany GPIO i polaryzacji. Kanały 1–3: LEDC timer 0; kanał 4: timer 1;
+kanał 5: timer 2, wszystkie low speed/APB, 12 bitów. Zakres konfigurowalny 4/5:
+100–19531 Hz; wszystkie wyjścia startują LOW/duty 0 jak wcześniej.
+GPIO19: zwykłe zwolnienie przełącza podświetlenie; gest 10 s otwiera tryb OTA.

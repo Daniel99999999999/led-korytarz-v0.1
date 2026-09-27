@@ -24,6 +24,7 @@
 #include <cstdint>
 
 class WifiService;
+class LocalOtaService;
 class MqttService;
 #if LED_CONTROLLER_AT24C08_ENABLED
 class SettingsService;
@@ -33,6 +34,9 @@ class LedController final {
   public:
     explicit LedController(WifiService* wifi_service = nullptr) noexcept;
 
+    void attachLocalOta(LocalOtaService& service) noexcept {
+        local_ota_ = &service;
+    }
     esp_err_t initialize() noexcept;
     esp_err_t start() noexcept;
     esp_err_t attachMqttService(MqttService* mqtt_service) noexcept;
@@ -96,6 +100,7 @@ class LedController final {
     std::array<PirInput, board_config::kPirInputs.size()> pir_inputs_;
     LcdService lcd_service_;
     Button lcd_backlight_button_;
+    LocalOtaService* local_ota_{nullptr};
     WifiService* wifi_service_{nullptr};
     MqttService* mqtt_service_{nullptr};
     BacklightPolicy backlight_policy_{};

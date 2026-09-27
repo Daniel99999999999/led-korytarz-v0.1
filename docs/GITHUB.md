@@ -1,6 +1,7 @@
 # GitHub i VS Code
 
-Projekt przygotowano do prywatnego repozytorium `led-korytarz`.
+Repozytorium kodu: https://github.com/Daniel99999999999/led-korytarz-v0.1
+Repozytorium publicznych wydań OTA: https://github.com/Daniel99999999999/led-korytarz-firmware
 Lokalna gałąź: main. Rozszerzenie: GitHub Pull Requests (GitHub.vscode-pull-request-github).
 
 ## Pierwsza publikacja
@@ -25,5 +26,23 @@ który różni się od fabrycznych sdkconfig.defaults. To nie jest kopia NVS ani
 
 Prywatne repozytorium źródeł nie zapewnia publicznego URL do firmware.
 Obecny firmware nie uwierzytelnia pobrań z prywatnych GitHub Releases.
-Do ustalenia pozostaje oddzielne publiczne repozytorium wydań binarnych albo inny
-serwer HTTPS. Sam Publish/Push nie uruchamia OTA ani nie publikuje firmware.bin.
+Utworzono osobne publiczne repozytorium `led-korytarz-firmware` (2026-09-27).
+Nie zawiera jeszcze wydania binarnego. Sam Publish/Push kodu nie uruchamia OTA
+ani nie publikuje firmware.bin.
+
+Kolejność pierwszego wydania:
+1. Zbudować nową wersję (inną niż wersja działająca na sterowniku).
+2. W publicznym repozytorium utworzyć Release z tagiem wersji i załączyć
+   `.pio/build/esp32doit-devkit-v1-ota/firmware.bin` z tego samego builda.
+3. W lokalnym, ignorowanym secrets.ota.json ustawić firmware_url na adres:
+   `https://github.com/Daniel99999999999/led-korytarz-firmware/releases/download/TAG/firmware.bin`
+   zastępując TAG rzeczywistym tagiem opublikowanego wydania. publish_path: null.
+4. Uzupełnić lokalne dane MQTT (nie przesyłać ich na GitHub).
+5. W PlatformIO wybrać profil esp32doit-devkit-v1-ota i Upload.
+
+Uploader sprawdza rozmiar i SHA-256 pliku z HTTPS względem lokalnego obrazu przed
+wysłaniem komendy MQTT. Jeżeli Upload przebuduje obraz, należy opublikować dokładnie
+nowy plik; nie omijać kontroli zgodności. Automatyczna publikacja GitHub Releases
+nie jest jeszcze częścią uploader-a. Prywatnego repozytorium kodu nie zmieniano
+na publiczne; nie opublikowano sekretów ani nie wykonano OTA.
+

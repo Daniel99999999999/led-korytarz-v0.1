@@ -716,6 +716,23 @@ void MqttService::handleData(const esp_mqtt_event_t& event) noexcept {
         return;
     }
 
+    for (std::size_t i = 0; i < 10; ++i) {
+        if (!topicEquals(event.topic, event.topic_len, topics_.pwm_command[i].data()))
+            continue;
+        ControlCommand command{};
+        command.kind = ControlCommand::Kind::pwm_setting;
+        command.channel_index = i / 5;
+        command.setting_index = static_cast<std::uint8_t>(i % 5);
+        if (event.retain ||
+            !pwm_config::parse(static_cast<unsigned>(i % 5), event.data,
+                               static_cast<std::size_t>(event.data_len), command.setting_value) ||
+            controller_.enqueueCommand(command) != ESP_OK) {
+            noteRejectedCommand();
+            return;
+        }
+        noteAcceptedCommand();
+        return;
+    }
     for (std::size_t index = 0; index < kChannelCount + kPirInputCount; ++index) {
         const bool mapping = index < kChannelCount;
         const std::size_t setting_index = mapping ? index : index - kChannelCount;
@@ -826,6 +843,8 @@ bool MqttService::synchronizeClient() noexcept {
     }
 
     bool queued = esp_mqtt_client_subscribe(client_, topics_.debug_command.data(), 1) >= 0;
+    for (const auto& topic : topics_.pwm_command)
+        queued = (esp_mqtt_client_subscribe(client_, topic.data(), 1) >= 0) && queued;
     for (const auto& command_topic : topics_.command) {
         if (esp_mqtt_client_subscribe(client_, command_topic.data(), 1) < 0) {
             ESP_LOGW(kTag, "Nie udalo sie zasubskrybowac %s", command_topic.data());
@@ -877,6 +896,19 @@ bool MqttService::publishSnapshot(const Snapshot& snapshot) noexcept {
         return true;
     };
 
+    for (std::size_t i = 0; i < 10; ++i) {
+        const auto value =
+            pwm_config::value(snapshot.local_config.pwm[i / 5], static_cast<unsigned>(i % 5));
+        std::array<char, 12> payload{};
+        if (i % 5 == 4)
+            std::snprintf(payload.data(), payload.size(), "%s", value ? "ON/OFF" : "PWM");
+        else
+            std::snprintf(payload.data(), payload.size(), "%u", static_cast<unsigned>(value));
+        const auto field = static_cast<MqttPublishTracker::Field>(
+            static_cast<unsigned>(MqttPublishTracker::Field::pwm_4_frequency) + i);
+        if (!enqueue_tracked(field, value, topics_.pwm_state[i].data(), payload.data()))
+            return false;
+    }
     for (std::size_t index = 0; index < kChannelCount; ++index) {
         const auto mask = snapshot.local_config.button_masks[index];
         if (!enqueue_tracked(MqttPublishTracker::mappingField(index), mask,
@@ -1229,6 +1261,19 @@ bool MqttService::buildTopics(const RuntimeConfig& config) noexcept {
         return (written >= 0) && (static_cast<std::size_t>(written) < size);
     };
 
+    for (std::size_t i = 0; i < 10; ++i) {
+        const int a =
+            std::snprintf(topics_.pwm_command[i].data(), kTopicLength, "%s/%s/config/pwm/%u/%s/set",
+                          config.topic_prefix.data(), device_id_.data(),
+                          static_cast<unsigned>(4 + i / 5), pwm_config::kFields[i % 5]);
+        const int b =
+            std::snprintf(topics_.pwm_state[i].data(), kTopicLength, "%s/%s/config/pwm/%u/%s/state",
+                          config.topic_prefix.data(), device_id_.data(),
+                          static_cast<unsigned>(4 + i / 5), pwm_config::kFields[i % 5]);
+        if (a < 0 || b < 0 || static_cast<std::size_t>(a) >= kTopicLength ||
+            static_cast<std::size_t>(b) >= kTopicLength)
+            return false;
+    }
     if (!format(topics_.base.data(), topics_.base.size(), "%s/%s", config.topic_prefix.data(),
                 device_id_.data()) ||
         !format(topics_.availability.data(), topics_.availability.size(), "%s/%s/availability",

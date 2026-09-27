@@ -9,6 +9,10 @@ bool validMask(const std::uint8_t mask) noexcept {
 }
 
 bool valid(const Config& config) noexcept {
+    for (const auto& pwm : config.pwm) {
+        if (!pwm_config::valid(pwm))
+            return false;
+    }
     if (config.lcd_override_seconds == 0U || config.lcd_override_seconds > kMaxOffDelaySeconds ||
         static_cast<unsigned>(config.backlight_mode) >= kBacklightOptions.size()) {
         return false;
@@ -27,7 +31,9 @@ bool valid(const Config& config) noexcept {
 }
 
 bool equal(const Config& left, const Config& right) noexcept {
-    return left.button_masks == right.button_masks &&
+    return pwm_config::equal(left.pwm[0], right.pwm[0]) &&
+           pwm_config::equal(left.pwm[1], right.pwm[1]) &&
+           left.button_masks == right.button_masks &&
            left.off_delay_seconds == right.off_delay_seconds &&
            left.lcd_override_seconds == right.lcd_override_seconds &&
            left.backlight_mode == right.backlight_mode;

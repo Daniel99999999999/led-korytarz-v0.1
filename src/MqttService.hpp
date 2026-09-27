@@ -128,7 +128,7 @@ class MqttService final {
     static constexpr std::uint32_t kServiceTaskStackSize = 6'144;
     static constexpr UBaseType_t kServiceTaskPriority = 3;
     static constexpr std::size_t kTopicLength = 160;
-    static constexpr std::size_t kDiscoveryPayloadLength = 16'384;
+    static constexpr std::size_t kDiscoveryPayloadLength = 24'576;
     static constexpr std::size_t kMqttBufferLength = 8'192;
     static constexpr std::uint64_t kOutboxLimit = 32'768;
 
@@ -142,6 +142,7 @@ class MqttService final {
 
     struct TopicLayout {
         std::array<char, kTopicLength> base{};
+        std::array<std::array<char, kTopicLength>, 10> pwm_command{}, pwm_state{};
         std::array<char, kTopicLength> availability{};
         std::array<char, kTopicLength> discovery{};
         std::array<char, kTopicLength> home_assistant_status{};

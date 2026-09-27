@@ -243,6 +243,42 @@ int main() {
     CHECK(lcd.probe(&token, present) == ESP_ERR_TIMEOUT);
 
     CHECK(LedChannel::initializePeripheral() == ESP_OK);
+    {
+        LedChannel fourth("fourth", GPIO_NUM_32, LEDC_CHANNEL_3),
+            fifth("fifth", GPIO_NUM_33, LEDC_CHANNEL_4);
+        CHECK(fourth.initialize() == ESP_OK);
+        CHECK(fifth.initialize() == ESP_OK);
+        CHECK(fake_ledc::timers[3] == LEDC_TIMER_1);
+        CHECK(fake_ledc::timers[4] == LEDC_TIMER_2);
+        pwm_config::Config config{};
+        config.frequency_hz = 1000;
+        config.minimum_percent = 20;
+        CHECK(fourth.configurePwm(config) == ESP_OK);
+        CHECK(fake_ledc::frequencies[0] == 19531);
+        CHECK(fake_ledc::frequencies[1] == 1000);
+        CHECK(fake_ledc::frequencies[2] == 19531);
+        CHECK(fake_ledc::duties[3] == 0); // configuring an OFF lamp never turns it on
+        CHECK(fourth.setBrightness(1, 0, 0) == ESP_OK);
+        CHECK(fourth.turnOn(0, 250) == ESP_OK);
+        CHECK(fourth.update(5) == ESP_OK);
+        CHECK(fake_ledc::duties[3] >= 819);
+        CHECK(fourth.turnOff(6, 250) == ESP_OK);
+        config.on_off = true;
+        CHECK(fourth.configurePwm(config) == ESP_OK);
+        CHECK(fake_ledc::duties[3] == 0);
+        CHECK(fourth.turnOn(7, 250) == ESP_OK);
+        CHECK(fake_ledc::duties[3] == 4096);
+        CHECK(fourth.turnOff(8, 250) == ESP_OK);
+        CHECK(fake_ledc::duties[3] == 0);
+        fake_ledc::fail_frequency = true;
+        config.frequency_hz = 500;
+        CHECK(fourth.configurePwm(config) == ESP_FAIL);
+        CHECK(fake_ledc::duties[3] == 0);
+        CHECK(fourth.turnOn(9, 0) == ESP_FAIL);
+        CHECK(fake_ledc::duties[4] == 0);
+        fake_ledc::fail_frequency = false;
+    }
+
     LedChannel led("test", GPIO_NUM_25, LEDC_CHANNEL_0);
     CHECK(led.prepareOutputLow() == ESP_OK);
     CHECK(led.initialize() == ESP_OK);

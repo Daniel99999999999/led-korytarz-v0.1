@@ -68,3 +68,10 @@ Test transportu na komputerze nie zastępuje testu elektrycznego i fizycznego LC
 - Stale OFF: przycisk daje czasowe ON, potem OFF mimo ruchu PIR2.
 - Czasowe OFF w dzień i zmiana trybu HA podczas wymuszenia.
 - Odtworzenie trybu i czasu z NVRAM po zaniku zasilania.
+
+## Przycisk serwisowy od v0.9.0
+
+Dedykowany przycisk LCD przytrzymany 10 s uruchamia lokalne OTA. Zwykłe naciśnięcie
+przełącza podświetlenie po zwolnieniu, bez wcześniejszego zdarzenia po 500 ms.
+Podczas sesji OTA ekran pokazuje dane hotspotu i wymusza podświetlenie.
+Szczegóły: [PWM/OTA](PWM_OTA_0.9.0.md). Kontroli DDRAM nie zmieniono.

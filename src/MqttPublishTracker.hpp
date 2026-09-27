@@ -34,6 +34,16 @@ class MqttPublishTracker final {
         lcd_mode,
         lcd_override,
         lcd_night,
+        pwm_4_frequency,
+        pwm_4_minimum,
+        pwm_4_on,
+        pwm_4_off,
+        pwm_4_mode,
+        pwm_5_frequency,
+        pwm_5_minimum,
+        pwm_5_on,
+        pwm_5_off,
+        pwm_5_mode,
         count,
     };
 

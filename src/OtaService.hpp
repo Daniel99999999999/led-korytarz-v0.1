@@ -41,6 +41,8 @@ class OtaService final {
     esp_err_t initialize() noexcept;
     esp_err_t start() noexcept;
     esp_err_t requestUpdate(const char* url, std::size_t length) noexcept;
+    esp_err_t beginLocalUpdate() noexcept;
+    void finishLocalUpdate(esp_err_t result, const char* version) noexcept;
     esp_err_t setStatusCallback(StatusCallback callback, void* context) noexcept;
 
     [[nodiscard]] Status status() const noexcept;

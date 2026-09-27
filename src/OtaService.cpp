@@ -150,6 +150,27 @@ esp_err_t OtaService::requestUpdate(const char* const url, const std::size_t len
     return ESP_OK;
 }
 
+esp_err_t OtaService::beginLocalUpdate() noexcept {
+    if (!initialized_ || !started_)
+        return ESP_ERR_INVALID_STATE;
+    {
+        MutexGuard lock(mutex_);
+        if (!lock.locked() || (status_.state != State::idle && status_.state != State::failed))
+            return ESP_ERR_INVALID_STATE;
+    }
+    bool expected = false;
+    if (!request_in_flight_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+        return ESP_ERR_INVALID_STATE;
+    updateStatus(State::downloading, 0, ESP_OK);
+    return ESP_OK;
+}
+void OtaService::finishLocalUpdate(const esp_err_t result, const char* version) noexcept {
+    updateStatus(result == ESP_OK ? State::rebooting : State::failed, result == ESP_OK ? 100 : 0,
+                 result, version);
+    if (result != ESP_OK)
+        request_in_flight_.store(false, std::memory_order_release);
+}
+
 esp_err_t OtaService::setStatusCallback(const StatusCallback callback,
                                         void* const context) noexcept {
     if (mutex_ == nullptr) {

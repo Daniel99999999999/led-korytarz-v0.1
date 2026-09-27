@@ -5,6 +5,7 @@
 #include "IrReceiverService.hpp"
 #endif
 #include "LedController.hpp"
+#include "LocalOtaService.hpp"
 #include "MqttService.hpp"
 #include "OtaService.hpp"
 #include "ServiceConsole.hpp"
@@ -28,6 +29,8 @@ extern "C" void app_main() {
     static WifiService wifi_service;
     static LedController controller(&wifi_service);
     static OtaService ota_service;
+    static LocalOtaService local_ota(ota_service);
+    controller.attachLocalOta(local_ota);
     static MqttService mqtt_service(controller, ota_service, wifi_service);
 #if LED_CONTROLLER_AT24C08_ENABLED
     static SettingsService settings_service(wifi_service, mqtt_service);
@@ -93,6 +96,11 @@ extern "C" void app_main() {
 
     if (wifi_prepare_result == ESP_OK) {
         const esp_err_t wifi_start_result = wifi_service.start();
+        if (wifi_start_result == ESP_OK && ota_prepare_result == ESP_OK) {
+            const auto local_result = local_ota.start();
+            if (local_result != ESP_OK)
+                ESP_LOGW(kTag, "Lokalne OTA niedostepne: %s", esp_err_to_name(local_result));
+        }
         if (wifi_start_result != ESP_OK) {
             ESP_LOGE(kTag, "Wi-Fi niedostepne; sterowanie lokalne pozostaje aktywne: %s",
                      esp_err_to_name(wifi_start_result));

@@ -1,5 +1,6 @@
 #include "LedController.hpp"
 
+#include "LocalOtaService.hpp"
 #include "MqttCommandParser.hpp"
 #include "MqttService.hpp"
 #include "TaskWatchdog.hpp"
@@ -67,11 +68,10 @@ LedController::LedController(WifiService* const wifi_service) noexcept
       buttons_(makeButtons(std::make_index_sequence<board_config::kButtons.size()>{})),
       pir_inputs_(makePirInputs(std::make_index_sequence<board_config::kPirInputs.size()>{})),
       lcd_service_(),
-      lcd_backlight_button_("Przycisk podswietlenia LCD", board_config::kLcdBacklightButtonPin,
-                            board_config::kLcdBacklightButtonActiveLow,
-                            board_config::kButtonDebounceMs, board_config::kButtonLongPressMs,
-                            board_config::kBrightnessStepIntervalMs,
-                            board_config::kButtonInternalPullUpsEnabled),
+      lcd_backlight_button_(
+          "Przycisk podswietlenia LCD", board_config::kLcdBacklightButtonPin,
+          board_config::kLcdBacklightButtonActiveLow, board_config::kButtonDebounceMs, 10'000U,
+          board_config::kBrightnessStepIntervalMs, board_config::kButtonInternalPullUpsEnabled),
       wifi_service_(wifi_service) {}
 
 esp_err_t LedController::initialize() noexcept {
@@ -564,15 +564,51 @@ void LedController::processControlCommands(const std::uint32_t now) noexcept {
             }
             continue;
         }
-        if (command.kind == ControlCommand::Kind::button_mapping ||
+        if (command.kind == ControlCommand::Kind::pwm_setting ||
+            command.kind == ControlCommand::Kind::button_mapping ||
             command.kind == ControlCommand::Kind::pir_delay ||
             command.kind == ControlCommand::Kind::lcd_override ||
             command.kind == ControlCommand::Kind::lcd_mode ||
             command.kind == ControlCommand::Kind::restore_local_config) {
             auto next = local_config_;
-            if (command.kind == ControlCommand::Kind::button_mapping &&
-                command.channel_index < next.button_masks.size() && command.setting_value <= 31U &&
-                local_control::validMask(static_cast<std::uint8_t>(command.setting_value))) {
+            if (command.kind == ControlCommand::Kind::pwm_setting && command.channel_index < 2) {
+                auto& pwm = next.pwm[command.channel_index];
+                switch (command.setting_index) {
+                case 0:
+                    pwm.frequency_hz = command.setting_value;
+                    break;
+                case 1:
+                    if (command.setting_value > 100)
+                        continue;
+                    pwm.minimum_percent = static_cast<std::uint8_t>(command.setting_value);
+                    break;
+                case 2:
+                    if (command.setting_value >= 16)
+                        continue;
+                    pwm.on_index = static_cast<std::uint8_t>(command.setting_value);
+                    break;
+                case 3:
+                    if (command.setting_value >= 16)
+                        continue;
+                    pwm.off_index = static_cast<std::uint8_t>(command.setting_value);
+                    break;
+                case 4:
+                    if (command.setting_value > 1)
+                        continue;
+                    pwm.on_off = command.setting_value != 0;
+                    break;
+                default:
+                    continue;
+                }
+                if (!local_control::valid(next)) {
+                    ESP_LOGW(kTag, "Odrzucono sprzeczne ograniczenia PWM kanalu %u",
+                             static_cast<unsigned>(command.channel_index + 4));
+                    continue;
+                }
+            } else if (command.kind == ControlCommand::Kind::button_mapping &&
+                       command.channel_index < next.button_masks.size() &&
+                       command.setting_value <= 31U &&
+                       local_control::validMask(static_cast<std::uint8_t>(command.setting_value))) {
                 next.button_masks[command.channel_index] =
                     static_cast<std::uint8_t>(command.setting_value);
             } else if (command.kind == ControlCommand::Kind::pir_delay &&
@@ -595,6 +631,23 @@ void LedController::processControlCommands(const std::uint32_t now) noexcept {
                 continue;
             }
             if (!local_control::equal(next, local_config_) || local_config_revision_ == 0U) {
+                bool pwm_ok = true;
+                for (std::size_t p = 0; p < 2; ++p) {
+                    if (!pwm_config::equal(next.pwm[p], local_config_.pwm[p])) {
+                        const auto error = leds_[p + 3].configurePwm(next.pwm[p]);
+                        if (error != ESP_OK) {
+                            ESP_LOGE(kTag, "Nie udalo sie zastosowac PWM: %s",
+                                     esp_err_to_name(error));
+                            latchStatusFault();
+                            pwm_ok = false;
+                        }
+                    }
+                }
+                if (!pwm_ok) {
+                    for (std::size_t p = 0; p < 2; ++p)
+                        static_cast<void>(leds_[p + 3].configurePwm(local_config_.pwm[p]));
+                    continue;
+                }
                 local_config_ = next;
                 ++local_config_revision_;
                 if (local_config_revision_ == 0U) {
@@ -1091,14 +1144,19 @@ void LedController::serviceLcd(const TickType_t now) noexcept {
         pir_input_initialized_[1] && pir_inputs_[1].isActive(), now_value, pir_delay));
     if (lcd_backlight_button_initialized_) {
         const Button::Event event = lcd_backlight_button_.poll(now);
-        if (event == Button::Event::short_press || event == Button::Event::long_press_started) {
+        if (event == Button::Event::long_press_started && local_ota_)
+            local_ota_->requestStart();
+        if (event == Button::Event::short_press) {
             backlight_policy_.toggle(
                 now_value,
                 static_cast<std::uint32_t>(pdMS_TO_TICKS(
                     static_cast<std::uint32_t>(local_config_.lcd_override_seconds) * 1000U)));
         }
     }
-    const esp_err_t backlight_result = lcd_service_.requestBacklight(backlight_policy_.isOn());
+    LcdDashboard::Lines service_screen{};
+    const bool service_active = local_ota_ && local_ota_->screen(service_screen);
+    const esp_err_t backlight_result =
+        lcd_service_.requestBacklight(service_active || backlight_policy_.isOn());
     if (backlight_result != ESP_OK) {
         handleLcdInternalFailure("ustawienie podswietlenia", backlight_result);
         return;
@@ -1164,6 +1222,7 @@ LcdService::Snapshot LedController::makeLcdSnapshot() noexcept {
 
     snapshot.local_config = local_config_;
     snapshot.local_config_revision = local_config_revision_;
+    snapshot.service_active = local_ota_ && local_ota_->screen(snapshot.service_lines);
     snapshot.status = LcdDashboard::Status::ok;
     if (system_fault_latched_ || lcd_fault_active_) {
         snapshot.status = LcdDashboard::Status::fault;

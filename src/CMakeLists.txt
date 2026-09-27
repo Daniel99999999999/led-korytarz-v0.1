@@ -13,6 +13,7 @@ set(component_sources
         "DebugLog.cpp"
         "DebugDiscovery.cpp"
         "OtaService.cpp"
+        "LocalOtaService.cpp"
         "PirInput.cpp"
         "I2cBus.cpp"
         "LcdDashboard.cpp"
@@ -36,6 +37,7 @@ set(component_private_requires
         esp_driver_i2c
         esp_driver_ledc
         esp_netif
+        esp_http_server
         esp_https_ota
         esp_partition
         esp_system

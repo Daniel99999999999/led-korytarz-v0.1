@@ -134,6 +134,60 @@ bool appendDiscovery(cJSON* const components, const char* const base,
             return false;
         }
     }
+    for (unsigned channel = 4; channel <= 5; ++channel)
+        for (unsigned field = 0; field < 5; ++field) {
+            std::array<char, 64> id{}, uid{}, name{};
+            std::array<char, 160> command{}, state{};
+            std::snprintf(id.data(), id.size(), "pwm_%u_%s", channel, pwm_config::kFields[field]);
+            const int u = std::snprintf(uid.data(), uid.size(), "%s_%s", device_id, id.data());
+            std::snprintf(name.data(), name.size(), "Kanal %u - %s", channel,
+                          pwm_config::kNames[field]);
+            const int a = std::snprintf(command.data(), command.size(), "%s/config/pwm/%u/%s/set",
+                                        base, channel, pwm_config::kFields[field]);
+            const int b = std::snprintf(state.data(), state.size(), "%s/config/pwm/%u/%s/state",
+                                        base, channel, pwm_config::kFields[field]);
+            if (u < 0 || a < 0 || b < 0 || static_cast<std::size_t>(u) >= uid.size() ||
+                static_cast<std::size_t>(a) >= command.size() ||
+                static_cast<std::size_t>(b) >= state.size())
+                return false;
+            auto* item = cJSON_AddObjectToObject(components, id.data());
+            if (!item || !cJSON_AddStringToObject(item, "p", field < 2 ? "number" : "select") ||
+                !cJSON_AddStringToObject(item, "name", name.data()) ||
+                !cJSON_AddStringToObject(item, "unique_id", uid.data()) ||
+                !cJSON_AddStringToObject(item, "entity_category", "config") ||
+                !cJSON_AddStringToObject(item, "command_topic", command.data()) ||
+                !cJSON_AddStringToObject(item, "state_topic", state.data()) ||
+                !cJSON_AddBoolToObject(item, "retain", false) ||
+                !cJSON_AddBoolToObject(item, "optimistic", false))
+                return false;
+            if (field < 2) {
+                if (!cJSON_AddNumberToObject(item, "min", field == 0 ? pwm_config::kMinHz : 0) ||
+                    !cJSON_AddNumberToObject(item, "max", field == 0 ? pwm_config::kMaxHz : 100) ||
+                    !cJSON_AddNumberToObject(item, "step", 1) ||
+                    !cJSON_AddStringToObject(item, "mode", "box") ||
+                    !cJSON_AddStringToObject(item, "unit_of_measurement",
+                                             field == 0 ? "Hz" : "%") ||
+                    !cJSON_AddStringToObject(item, "command_template", "{{ value | int }}"))
+                    return false;
+            } else {
+                auto* options = cJSON_AddArrayToObject(item, "options");
+                if (!options)
+                    return false;
+                for (unsigned index = 0; index < (field == 4 ? 2U : 16U); ++index) {
+                    std::array<char, 12> text{};
+                    if (field == 4)
+                        std::snprintf(text.data(), text.size(), "%s", index ? "ON/OFF" : "PWM");
+                    else
+                        std::snprintf(text.data(), text.size(), "%u",
+                                      static_cast<unsigned>(pwm_config::kPulseUs[index]));
+                    auto* option = cJSON_CreateString(text.data());
+                    if (!option || !cJSON_AddItemToArray(options, option)) {
+                        cJSON_Delete(option);
+                        return false;
+                    }
+                }
+            }
+        }
     return true;
 }
 } // namespace local_control

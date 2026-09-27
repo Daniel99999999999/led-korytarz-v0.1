@@ -424,11 +424,14 @@ void LcdService::taskEntry(void* const context) noexcept {
                 }
 
                 if ((result == ESP_OK) && frame_due) {
-                    const LcdDashboard::Lines lines = LcdDashboard::render(
-                        latest_snapshot.channels, latest_snapshot.status,
-                        latest_snapshot.uptime_seconds, latest_snapshot.network,
-                        latest_snapshot.mqtt, information_page, latest_snapshot.notice,
-                        latest_snapshot.measurement, measurement_page);
+                    const LcdDashboard::Lines lines =
+                        latest_snapshot.service_active
+                            ? latest_snapshot.service_lines
+                            : LcdDashboard::render(latest_snapshot.channels, latest_snapshot.status,
+                                                   latest_snapshot.uptime_seconds,
+                                                   latest_snapshot.network, latest_snapshot.mqtt,
+                                                   information_page, latest_snapshot.notice,
+                                                   latest_snapshot.measurement, measurement_page);
                     result = display_.show(lines);
                     failed_operation = "odswiezenie ekranu";
                     if (result == ESP_OK) {

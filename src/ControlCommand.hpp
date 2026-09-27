@@ -16,6 +16,7 @@ struct ControlCommand final {
         lcd_night,
         lcd_override,
         lcd_mode,
+        pwm_setting,
     };
 
     enum class StateAction : std::uint8_t {
@@ -34,4 +35,5 @@ struct ControlCommand final {
     IrRemoteAction infrared{};
     local_control::Config local_config{};
     std::uint16_t setting_value{0};
+    std::uint8_t setting_index{0};
 };

@@ -52,3 +52,18 @@ stan startu i retry przed clear/disconnect/apply. Stop klienta, który jeszcze n
 pomija esp_mqtt_client_stop i niszczy uchwyt. Udany start nie jest powtarzany na GOT_IP;
 ponowne połączenia obsługuje ESP-MQTT. Zanik sieci może nastąpić także po sprawdzeniu
 znacznika; zwykła obsługa błędów transportu pozostaje aktywna.
+
+## v0.9.0 — PWM4/5 i lokalne OTA
+
+Model PwmConfig sprawdza ograniczenia i ogranicza duty także podczas fade. Komendy
+10 encji discovery trafiają przez ControlCommand do LedController; inne wątki
+nie dotykają LEDC. DS1307 zachowuje dwa sloty/CRC/commit, kompresując payload v2
+w 115 bitach; v1 nadal czytelny. Tracker MQTT ma 37 pól, bufor discovery 24 KiB.
+
+LocalOtaService ma własne zadanie obsługi AP i osobne zadanie HTTP do transferu.
+Przycisk LCD wysyła tylko atomowe żądanie. Snapshot ekranu jest pobierany bez czekania
+na mutex; hasło nie przechodzi do migawki MQTT. OtaService udostępnia wspólną blokadę
+z MQTT/HTTPS OTA. Obie ścieżki używają nieaktywnej partycji i dotychczasowej weryfikacji
+startu/rollback. AP używa RAM i nie zmienia ustawień sieci w AT24C08N.
+Strona przyjmuje surowy binarny POST, weryfikuje adres AP, token i deskryptor przed
+zapisem; odrzuca obcy projekt i tę samą wersję, obsługuje przerwanie i limit czasu.

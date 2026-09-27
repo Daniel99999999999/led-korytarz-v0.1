@@ -14,6 +14,8 @@ namespace board_config {
 
 inline constexpr ledc_mode_t kLedcSpeedMode = LEDC_LOW_SPEED_MODE;
 inline constexpr ledc_timer_t kLedcTimer = LEDC_TIMER_0;
+inline constexpr ledc_timer_t kChannel4Timer = LEDC_TIMER_1;
+inline constexpr ledc_timer_t kChannel5Timer = LEDC_TIMER_2;
 inline constexpr ledc_timer_bit_t kPwmResolution = LEDC_TIMER_12_BIT;
 // API przyjmuje cale Hz; dzielnik 80 MHz / 4096 daje 19 531,25 Hz.
 inline constexpr std::uint32_t kPwmFrequencyHz = 19'531;

@@ -41,6 +41,8 @@ class LcdService final {
         LcdDashboard::MqttSnapshot mqtt;
         LcdDashboard::NoticeSnapshot notice;
         LcdDashboard::MeasurementSnapshot measurement;
+        bool service_active{false};
+        LcdDashboard::Lines service_lines{};
         local_control::Config local_config{};
         std::uint32_t local_config_revision{0};
     };

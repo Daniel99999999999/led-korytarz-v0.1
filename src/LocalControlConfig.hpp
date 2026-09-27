@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PwmConfig.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +27,7 @@ inline constexpr std::array<const char*, 3> kBacklightOptions{
     {"Automatyczne", "Stale OFF", "Stale ON"}};
 
 struct Config final {
+    std::array<pwm_config::Config, 2> pwm{};
     std::array<std::uint8_t, kChannelCount> button_masks{{1, 2, 4, 8, 16}};
     std::array<std::uint16_t, kPirCount> off_delay_seconds{};
     std::uint16_t lcd_override_seconds{120};

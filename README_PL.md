@@ -1,5 +1,16 @@
 # Sterownik LED - firmware v0.7.2
 
+## v0.9.0 — PWM4/5 i hotspot lokalnego OTA
+
+Dodano 10 ustawień HA dla kanałów 4/5, osobne timery, walidację ograniczeń i rekord
+DS1307 v2 z odczytem v1. Przytrzymanie przycisku LCD przez 10 s uruchamia hotspot
+WPA2 ze stroną uploadu firmware i danymi dostępu na LCD; sesja trwa 10 min.
+Nie zmienia konfiguracji STA/MQTT ani GPIO. Zdalne OTA nadal działa.
+[Instrukcja, zakresy, pamięć i lista testów sprzętowych](docs/PWM_OTA_0.9.0.md).
+Kod wymaga testów na ESP32; nie wykonano wgrania ani publikacji wydania.
+Wyniki kompilacji i testów: PLANS.md.
+
+
 
 ## Diagnostyka sieci v0.8.2 — zakres końcowy
 

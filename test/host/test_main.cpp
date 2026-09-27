@@ -11,6 +11,7 @@
 #include "LcdDashboard.hpp"
 #include "LocalConfigRecord.hpp"
 #include "LocalControlDiscovery.hpp"
+#include "LocalOtaValidation.hpp"
 #include "MqttCommandParser.hpp"
 #include "MqttPublishTracker.hpp"
 #include "NecDecoder.hpp"
@@ -1215,7 +1216,7 @@ void testLocalControlDiscovery() noexcept {
     cJSON* components = cJSON_CreateObject();
     EXPECT_TRUE(components != nullptr);
     EXPECT_TRUE(local_control::appendDiscovery(components, "led/device", "device"));
-    EXPECT_EQ(10, cJSON_GetArraySize(components));
+    EXPECT_EQ(20, cJSON_GetArraySize(components));
     cJSON* key = cJSON_GetObjectItemCaseSensitive(components, "key_1");
     EXPECT_TRUE(key != nullptr);
     EXPECT_TRUE(std::strcmp(cJSON_GetObjectItemCaseSensitive(key, "entity_category")->valuestring,
@@ -1380,7 +1381,146 @@ void testDebugDiscovery() noexcept {
     EXPECT_TRUE(!debug_discovery::append(nullptr, "x", "y"));
 }
 
+void testPwmConstraints() noexcept {
+    pwm_config::Config c{};
+    EXPECT_TRUE(pwm_config::valid(c));
+    for (unsigned duty = 0; duty < 4096; ++duty)
+        EXPECT_EQ(duty, pwm_config::constrain(duty, c));
+    c.frequency_hz = 1000;
+    c.minimum_percent = 20;
+    c.on_index = 7;
+    c.off_index = 7;
+    EXPECT_TRUE(pwm_config::valid(c));
+    EXPECT_EQ(0U, pwm_config::constrain(0, c));
+    EXPECT_EQ(819U, pwm_config::constrain(1, c));
+    EXPECT_EQ(3686U, pwm_config::constrain(4095, c));
+    for (unsigned duty = 1; duty < 4096; ++duty) {
+        auto actual = pwm_config::constrain(duty, c);
+        EXPECT_TRUE(actual >= 819 && actual <= 3686);
+    }
+    c.minimum_percent = 100;
+    EXPECT_TRUE(!pwm_config::valid(c));
+    c.minimum_percent = 0;
+    c.on_index = 15;
+    EXPECT_TRUE(!pwm_config::valid(c));
+    c.on_index = 0;
+    c.off_index = 0;
+    c.frequency_hz = 99;
+    EXPECT_TRUE(!pwm_config::valid(c));
+    c.frequency_hz = 19532;
+    EXPECT_TRUE(!pwm_config::valid(c));
+    c.frequency_hz = 100;
+    c.on_off = true;
+    EXPECT_EQ(4096U, pwm_config::constrain(1, c));
+    EXPECT_EQ(0U, pwm_config::constrain(0, c));
+    std::uint16_t v = 0;
+    EXPECT_TRUE(pwm_config::parse(0, "19531", 5, v));
+    EXPECT_EQ(19531U, v);
+    EXPECT_TRUE(!pwm_config::parse(0, "99999", 5, v));
+    EXPECT_TRUE(!pwm_config::parse(1, "-1", 2, v));
+    EXPECT_TRUE(!pwm_config::parse(1, "1.0", 3, v));
+    EXPECT_TRUE(!pwm_config::parse(2, "3", 1, v));
+    EXPECT_TRUE(pwm_config::parse(2, "100", 3, v));
+    EXPECT_EQ(7U, v);
+    EXPECT_TRUE(pwm_config::parse(4, "ON/OFF", 6, v));
+    EXPECT_EQ(1U, v);
+}
+void testPwmNvramMigration() noexcept {
+    // Known v1 layout: mapping, delays and backlight must survive decoding with defaults for PWM.
+    local_control::Record old{};
+    old[0] = 'L';
+    old[1] = 'C';
+    old[2] = 'F';
+    old[3] = 1;
+    old[4] = 42;
+    old[8] = 3;
+    old[9] = 0;
+    old[10] = 4;
+    old[11] = 8;
+    old[12] = 16;
+    old[13] = 60;
+    old[15] = 120;
+    old[17] = 120;
+    old[19] = 1;
+    std::uint32_t crc = 0xFFFFFFFFU;
+    for (unsigned i = 0; i < 23; ++i) {
+        crc ^= old[i];
+        for (unsigned j = 0; j < 8; ++j)
+            crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320U : 0U);
+    }
+    crc = ~crc;
+    for (unsigned i = 0; i < 4; ++i)
+        old[23 + i] = static_cast<std::uint8_t>(crc >> (8 * i));
+    old[27] = local_control::kCommit;
+    local_control::Config config{};
+    std::uint32_t seq = 0;
+    EXPECT_TRUE(local_control::decodeRecord(old, config, seq));
+    EXPECT_EQ(42U, seq);
+    EXPECT_EQ(3U, config.button_masks[0]);
+    EXPECT_EQ(120U, config.off_delay_seconds[1]);
+    EXPECT_EQ(19531U, config.pwm[0].frequency_hz);
+    config.pwm[0] = {100, 25, 10, 10, false};
+    config.pwm[1] = {1000, 10, 3, 4, true};
+    const auto record = local_control::encodeRecord(config, 43);
+    local_control::Config decoded{};
+    EXPECT_TRUE(local_control::decodeRecord(record, decoded, seq));
+    EXPECT_TRUE(local_control::equal(config, decoded));
+    for (unsigned i = 0; i < 28; ++i) {
+        auto broken = record;
+        broken[i] ^= 1;
+        EXPECT_TRUE(!local_control::decodeRecord(broken, decoded, seq));
+    }
+    std::array<local_control::Record, 2> slots{{old, record}};
+    for (unsigned bytes = 0; bytes < 28; ++bytes) {
+        slots[1].fill(0);
+        for (unsigned i = 0; i < bytes; ++i)
+            slots[1][i] = record[i];
+        EXPECT_EQ(0, local_control::newestRecord(slots, decoded, seq));
+    }
+}
+void testLocalOtaImageHeader() noexcept {
+    std::array<char, 288> image{};
+    image[0] = static_cast<char>(0xE9);
+    image[32] = 0x32;
+    image[33] = 0x54;
+    image[34] = static_cast<char>(0xCD);
+    image[35] = static_cast<char>(0xAB);
+    std::strcpy(image.data() + 48, "0.9.1");
+    std::strcpy(image.data() + 80, "led_controller");
+    EXPECT_TRUE(
+        local_ota_validation::header(image.data(), image.size(), "led_controller", "0.9.0"));
+    EXPECT_TRUE(!local_ota_validation::header(image.data(), 287, "led_controller", "0.9.0"));
+    EXPECT_TRUE(
+        !local_ota_validation::header(image.data(), image.size(), "another_project", "0.9.0"));
+    EXPECT_TRUE(
+        !local_ota_validation::header(image.data(), image.size(), "led_controller", "0.9.1"));
+    image[32] = 0;
+    EXPECT_TRUE(
+        !local_ota_validation::header(image.data(), image.size(), "led_controller", "0.9.0"));
+    image[32] = 0x32;
+    std::memset(image.data() + 48, 'x', 32);
+    EXPECT_TRUE(
+        !local_ota_validation::header(image.data(), image.size(), "led_controller", "0.9.0"));
+}
+void testLocalOtaButtonGesture() noexcept {
+    ButtonGesture gesture(10000, 40);
+    gesture.reset(false, 0);
+    EXPECT_EQ(ButtonGesture::Event::none, gesture.update(true, 100));
+    EXPECT_EQ(ButtonGesture::Event::none, gesture.update(true, 600));
+    EXPECT_EQ(ButtonGesture::Event::short_press, gesture.update(false, 900));
+    EXPECT_EQ(ButtonGesture::Event::none, gesture.update(true, 1000));
+    EXPECT_EQ(ButtonGesture::Event::none, gesture.update(true, 10999));
+    EXPECT_EQ(ButtonGesture::Event::long_press_started, gesture.update(true, 11000));
+    EXPECT_EQ(ButtonGesture::Event::long_press_ended, gesture.update(false, 11001));
+    gesture.reset(true, 12000);
+    EXPECT_EQ(ButtonGesture::Event::none, gesture.update(true, 30000));
+}
+
 int main() {
+    testPwmConstraints();
+    testPwmNvramMigration();
+    testLocalOtaImageHeader();
+    testLocalOtaButtonGesture();
     testDebugSession();
     testDebugOverflowAndRenewal();
     testDebugDiscovery();
@@ -1445,6 +1585,6 @@ int main() {
         return 1;
     }
 
-    std::printf("Host tests passed: 58\n");
+    std::printf("Host tests passed: 62\n");
     return 0;
 }
