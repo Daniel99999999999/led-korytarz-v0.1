@@ -70,14 +70,13 @@ class LedController final {
 #if LED_CONTROLLER_IR_NEC_ENABLED
     void processIrAction(const IrRemoteAction& action, std::uint32_t now) noexcept;
     void serviceIrTimers(std::uint32_t now) noexcept;
-    void applyIrMasterPower(const IrRemoteAction& action, std::uint32_t now) noexcept;
+    void applyIrSelectedPower(const IrRemoteAction& action, std::uint32_t now) noexcept;
     void applyIrTargetToggle(const IrRemoteAction& action, std::uint32_t now) noexcept;
     void applyIrNightToggle(const IrRemoteAction& action, std::uint32_t now) noexcept;
     void applyIrBrightness(const IrRemoteAction& action, std::uint32_t now, bool increase) noexcept;
     void applyIrTimerToggle(const IrRemoteAction& action, std::uint32_t now) noexcept;
     void handleIrChannelResult(std::size_t index, const char* operation, esp_err_t result) noexcept;
-    void cancelIrRestoreForChannel(std::size_t index) noexcept;
-    void cancelIrMasterRestore() noexcept;
+    void clearIrNightForChannel(std::size_t index) noexcept;
     void clearIrNightForTarget(std::uint8_t target) noexcept;
     void showIrTargetNotice(std::uint8_t target, std::uint32_t now) noexcept;
     void showIrNotice(const char* text, std::uint32_t now) noexcept;
@@ -151,8 +150,6 @@ class LedController final {
     std::uint32_t mqtt_last_temperature_revision_{0};
 #endif
 #if LED_CONTROLLER_IR_NEC_ENABLED
-    std::array<bool, board_config::kLeds.size()> ir_master_saved_on_{};
-    std::array<std::uint8_t, board_config::kLeds.size()> ir_master_saved_brightness_{};
     std::array<bool, board_config::kLeds.size()> ir_night_active_{};
     std::array<bool, board_config::kLeds.size()> ir_night_saved_on_{};
     std::array<std::uint8_t, board_config::kLeds.size()> ir_night_saved_brightness_{};
@@ -160,8 +157,6 @@ class LedController final {
     std::array<std::uint32_t, board_config::kLeds.size()> ir_timer_deadline_{};
     LcdDashboard::Line ir_notice_text_{};
     std::uint32_t ir_notice_expires_at_{0};
-    bool ir_master_saved_valid_{false};
-    bool ir_master_off_active_{false};
     bool ir_notice_active_{false};
 #endif
 };

@@ -34,9 +34,9 @@ class LedChannel final {
     [[nodiscard]] std::uint8_t appliedBrightness() const noexcept;
     [[nodiscard]] bool isTransitionActive() const noexcept;
     [[nodiscard]] const char* name() const noexcept;
+    [[nodiscard]] esp_err_t operationalStatus() const noexcept;
 
   private:
-    [[nodiscard]] esp_err_t operationalStatus() const noexcept;
     esp_err_t scheduleTarget(std::uint32_t duty, std::uint32_t transition_duration,
                              std::uint32_t now) noexcept;
     esp_err_t synchronize() noexcept;

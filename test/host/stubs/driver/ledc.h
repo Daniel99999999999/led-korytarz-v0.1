@@ -8,6 +8,7 @@ inline std::array<std::uint32_t, 4> frequencies{};
 inline std::array<std::uint32_t, 8> duties{};
 inline std::array<int, 8> timers{};
 inline bool fail_frequency = false;
+inline bool fail_stop = false;
 } // namespace fake_ledc
 
 using ledc_mode_t = int;
@@ -50,6 +51,8 @@ inline int ledc_update_duty(int, int) {
     return ESP_OK;
 }
 inline int ledc_stop(int, int channel, int) {
+    if (fake_ledc::fail_stop)
+        return ESP_FAIL;
     fake_ledc::duties[channel] = 0;
     return ESP_OK;
 }

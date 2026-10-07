@@ -915,3 +915,34 @@ strona uploadu, zachowanie konfiguracji STA oraz zdalnego MQTT/HTTPS OTA.
 
 Nie zmieniać GPIO ani zapisanej sieci. Nie publikować wydania ani nie wgrywać urządzenia.
 Nie utożsamiać ustawień PWM z potwierdzeniem kompatybilności żarówek Diall.
+
+## 2026-10-06 — poprawki audytu v0.9.0
+
+- [x] Przy błędzie LEDC przejąć wyjście jako GPIO LOW i zgłosić niepowodzenie przejęcia.
+- [x] Zliczać komendę PWM jako przyjętą lub odrzuconą po decyzji kontrolera, bez blokowania jego zadania.
+- [x] Dodać i uruchomić test hostowy awarii `ledc_stop` oraz pierwszego ustawienia GPIO LOW.
+- [x] Uruchomić pełną kompilację PlatformIO po uzupełnieniu lokalnych zależności ESP-IDF.
+
+Bez zmiany GPIO, polaryzacji, wersji firmware i zapisanych ustawień. Test na ESP32 pozostaje osobnym krokiem.
+
+## 2026-10-07 — czerwony POWER pilota tylko dla wybranego kanalu
+
+- [x] Zmienic POWER na przelaczanie jednego kanalu 1-5; przy celu WSZYSTKIE nie zmieniac LED.
+- [x] Usunac nieuzywany zapis i odtwarzanie stanu wszystkich kanalow.
+- [x] Rozszerzyc testy mapowania pilota, dokumentacje i uruchomic `check.sh`.
+- [ ] HIL: sprawdzic POWER na wybranych kanalach, brak zmian przy WSZYSTKIE i RGB ON/OFF na grupie.
+
+RGB ON/OFF zachowuje obsluge celu WSZYSTKIE. Bez zmiany GPIO, polaryzacji i ustawien trwalych.
+Test na ESP32 pozostaje do wykonania; nie wgrywac firmware automatycznie.
+
+## 2026-10-07 - przygotowanie v0.9.1 do OTA przez GitHub
+
+- [x] Podniesc `PROJECT_VER` z 0.9.0 do 0.9.1 dla poprawki POWER pilota.
+- [x] Zbudowac pelny profil `esp32doit-devkit-v1-ota` i sprawdzic deskryptor obrazu.
+- [ ] Opublikowac dokladnie ten `firmware.bin` w publicznym Release `v0.9.1`.
+- [ ] Uzupelnic lokalny, ignorowany `secrets.ota.json`, porownac SHA-256 obrazu z HTTPS
+      i dopiero wtedy uruchomic upload OTA oraz HIL pilota na urzadzeniu.
+
+Publiczne repozytorium wydan nie ma jeszcze Release, a na tym komputerze nie ma
+`secrets.ota.json`. Kompilacja profilu OTA przeszla; obraz `led_controller/0.9.1`
+ma 1 277 440 B. Nie wykonano publikacji ani aktualizacji ESP32.

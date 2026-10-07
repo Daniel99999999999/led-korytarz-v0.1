@@ -8,6 +8,8 @@ Przypisanie KEY jest mapą logiczną; aktualizacja każdego PWM jest niezależna
 Regulacja grupy zamraża maskę kanałów do zakończenia gestu.
 
 MQTT i IR przekazują komendy przez statyczną kolejkę (10 elementów), bez dostępu do LEDC.
+Pilotowy czerwony POWER przełącza tylko wybrany kanał 1–5; wybór WSZYSTKIE daje komunikat
+bez zmiany wyjść. Przycisk RGB ON/OFF nadal może przełączyć cel WSZYSTKIE.
 Nowe komendy zmieniają pojedyncze ustawienie KEY/PIR/LCD lub odtwarzają cały rekord NVRAM.
 Odtwarzanie jest przyjmowane tylko przed pierwszą zmianą konfiguracji w RAM.
 Sterowanie lokalne nie zależy od Wi-Fi, MQTT, odczytu pamięci ani OTA.
@@ -59,6 +61,8 @@ Model PwmConfig sprawdza ograniczenia i ogranicza duty także podczas fade. Kome
 10 encji discovery trafiają przez ControlCommand do LedController; inne wątki
 nie dotykają LEDC. DS1307 zachowuje dwa sloty/CRC/commit, kompresując payload v2
 w 115 bitach; v1 nadal czytelny. Tracker MQTT ma 37 pól, bufor discovery 24 KiB.
+Wynik komendy PWM jest liczony po decyzji kontrolera, bez czekania w zadaniu MQTT.
+Awaria LEDC zatrzaskuje kanał OFF i wyzwala próbę przejęcia jego pinu jako GPIO LOW.
 
 LocalOtaService ma własne zadanie obsługi AP i osobne zadanie HTTP do transferu.
 Przycisk LCD wysyła tylko atomowe żądanie. Snapshot ekranu jest pobierany bez czekania

@@ -277,6 +277,20 @@ int main() {
         CHECK(fourth.turnOn(9, 0) == ESP_FAIL);
         CHECK(fake_ledc::duties[4] == 0);
         fake_ledc::fail_frequency = false;
+
+        CHECK(fifth.turnOn(10, 0) == ESP_OK);
+        CHECK(fake_ledc::duties[4] > 0);
+        fake_ledc::fail_stop = true;
+        fake_gpio::levels[GPIO_NUM_33] = 1;
+        fake_gpio::fail_set_level_once = true;
+        config.frequency_hz = 500;
+        CHECK(fifth.configurePwm(config) == ESP_FAIL);
+        CHECK(fake_ledc::duties[4] > 0); // LEDC stop failed in the adapter
+        CHECK(fake_gpio::gpio_output[GPIO_NUM_33]);
+        CHECK(fake_gpio::levels[GPIO_NUM_33] == 0);
+        CHECK(fifth.operationalStatus() == ESP_FAIL);
+        CHECK(fifth.turnOn(11, 0) == ESP_FAIL);
+        fake_ledc::fail_stop = false;
     }
 
     LedChannel led("test", GPIO_NUM_25, LEDC_CHANNEL_0);

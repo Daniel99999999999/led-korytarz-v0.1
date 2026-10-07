@@ -166,8 +166,8 @@ void testIrRemoteRoleSelection() noexcept {
     EXPECT_EQ(IrRemoteMapper::Role::white_controller, mapper.activeRole());
 
     action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::power), 300);
-    EXPECT_EQ(IrRemoteAction::Type::master_power, action.type);
-    EXPECT_EQ(IrRemoteAction::kAllChannelsTarget, action.target);
+    EXPECT_EQ(IrRemoteAction::Type::selected_power, action.type);
+    EXPECT_EQ(0U, action.target);
 
     action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::select_rgb_controller), 400);
     EXPECT_EQ(IrRemoteAction::Type::rgb_role_selected, action.type);
@@ -186,8 +186,24 @@ void testIrRemoteTargetAndTransitionSelection() noexcept {
     EXPECT_EQ(IrRemoteAction::Type::target_changed, action.type);
     EXPECT_EQ(IrRemoteAction::kAllChannelsTarget, action.target);
 
+    action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::power), 150);
+    EXPECT_EQ(IrRemoteAction::Type::power_target_required, action.type);
+    action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::rgb_toggle), 175);
+    EXPECT_EQ(IrRemoteAction::Type::target_toggle, action.type);
+    EXPECT_EQ(IrRemoteAction::kAllChannelsTarget, action.target);
+
     action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::target_next), 200);
     EXPECT_EQ(0U, action.target);
+    action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::target_next), 225);
+    EXPECT_EQ(1U, action.target);
+    action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::power), 250);
+    EXPECT_EQ(IrRemoteAction::Type::selected_power, action.type);
+    EXPECT_EQ(1U, action.target);
+    action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::target_next), 275);
+    EXPECT_EQ(2U, action.target);
+    action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::power), 290);
+    EXPECT_EQ(IrRemoteAction::Type::selected_power, action.type);
+    EXPECT_EQ(2U, action.target);
     EXPECT_EQ(500U, mapper.transitionMs());
 
     action = mapper.process(makeRemoteFrame(IrRemoteMapper::Command::cycle_transition), 300);

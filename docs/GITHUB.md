@@ -46,3 +46,10 @@ nowy plik; nie omijać kontroli zgodności. Automatyczna publikacja GitHub Relea
 nie jest jeszcze częścią uploader-a. Prywatnego repozytorium kodu nie zmieniano
 na publiczne; nie opublikowano sekretów ani nie wykonano OTA.
 
+Stan 2026-10-07: przygotowano lokalnie obraz `led_controller/0.9.1` w
+`.pio/build/esp32doit-devkit-v1-ota/firmware.bin`. Publiczne repozytorium wydań
+nie ma jeszcze Release, a na tym komputerze nie ma `secrets.ota.json`.
+Najpierw opublikować Release `v0.9.1` z tym plikiem, potem ustawić jego URL
+w lokalnej konfiguracji i uruchomić profil OTA. Nie uruchamiać Upload z innym
+artefaktem: uploader porównuje SHA-256 obrazu lokalnego i pobranego przez HTTPS.
+

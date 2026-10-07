@@ -45,10 +45,7 @@ esp_err_t LedChannel::initializePeripheral() noexcept {
 }
 
 esp_err_t LedChannel::prepareOutputLow() noexcept {
-    esp_err_t result = gpio_set_level(pwm_pin_, 0);
-    if (result != ESP_OK) {
-        return result;
-    }
+    const esp_err_t preload_result = gpio_set_level(pwm_pin_, 0);
 
     gpio_config_t config{};
     config.pin_bit_mask = 1ULL << static_cast<unsigned>(pwm_pin_);
@@ -56,7 +53,13 @@ esp_err_t LedChannel::prepareOutputLow() noexcept {
     config.pull_up_en = GPIO_PULLUP_DISABLE;
     config.pull_down_en = GPIO_PULLDOWN_DISABLE;
     config.intr_type = GPIO_INTR_DISABLE;
-    return gpio_config(&config);
+    const esp_err_t config_result = gpio_config(&config);
+    const esp_err_t low_result = gpio_set_level(pwm_pin_, 0);
+    if (config_result != ESP_OK)
+        return config_result;
+    if (low_result != ESP_OK)
+        return low_result;
+    return preload_result;
 }
 
 esp_err_t LedChannel::initialize() noexcept {
@@ -285,7 +288,13 @@ esp_err_t LedChannel::latchOutputFault(const esp_err_t error) noexcept {
     }
 
     output_fault_ = error;
-    static_cast<void>(ledc_stop(board_config::kLedcSpeedMode, channel_, 0));
+    const esp_err_t stop_result = ledc_stop(board_config::kLedcSpeedMode, channel_, 0);
+    // GPIO configuration selects PIN_FUNC_GPIO, disconnecting a faulty LEDC output.
+    const esp_err_t gpio_result = prepareOutputLow();
+    if (stop_result != ESP_OK || gpio_result != ESP_OK) {
+        ESP_LOGE(kTag, "%s: awaryjne LOW: LEDC=%s, GPIO=%s", name_, esp_err_to_name(stop_result),
+                 esp_err_to_name(gpio_result));
+    }
     power_transition_ = true;
     state_.turnOff();
     transition_.reset(0, 0);

@@ -369,7 +369,7 @@ void LedController::servicePir(const std::uint32_t now) noexcept {
             continue;
         }
 #if LED_CONTROLLER_IR_NEC_ENABLED
-        cancelIrRestoreForChannel(index);
+        clearIrNightForChannel(index);
 #endif
         const auto fade = static_cast<std::uint32_t>(pdMS_TO_TICKS(board_config::kFadeTimeMs));
         handleChannelResult(index, action == PirAutomation::Action::turn_on
@@ -419,7 +419,7 @@ void LedController::handleButton(const std::size_t index, const Button::Event ev
             }
             manualOverride(channel);
 #if LED_CONTROLLER_IR_NEC_ENABLED
-            cancelIrRestoreForChannel(channel);
+            clearIrNightForChannel(channel);
 #endif
             if (leader == leds_.size() ||
                 leds_[channel].brightness() > leds_[leader].brightness()) {
@@ -571,38 +571,59 @@ void LedController::processControlCommands(const std::uint32_t now) noexcept {
             command.kind == ControlCommand::Kind::lcd_mode ||
             command.kind == ControlCommand::Kind::restore_local_config) {
             auto next = local_config_;
+            const bool pwm_command = command.kind == ControlCommand::Kind::pwm_setting;
+            const auto report_pwm_result = [this, pwm_command](const bool applied) noexcept {
+                if (pwm_command && mqtt_service_ != nullptr) {
+                    mqtt_service_->recordPwmCommandResult(applied);
+                }
+            };
             if (command.kind == ControlCommand::Kind::pwm_setting && command.channel_index < 2) {
                 auto& pwm = next.pwm[command.channel_index];
+                bool setting_valid = true;
                 switch (command.setting_index) {
                 case 0:
                     pwm.frequency_hz = command.setting_value;
                     break;
                 case 1:
                     if (command.setting_value > 100)
-                        continue;
-                    pwm.minimum_percent = static_cast<std::uint8_t>(command.setting_value);
+                        setting_valid = false;
+                    else
+                        pwm.minimum_percent = static_cast<std::uint8_t>(command.setting_value);
                     break;
                 case 2:
                     if (command.setting_value >= 16)
-                        continue;
-                    pwm.on_index = static_cast<std::uint8_t>(command.setting_value);
+                        setting_valid = false;
+                    else
+                        pwm.on_index = static_cast<std::uint8_t>(command.setting_value);
                     break;
                 case 3:
                     if (command.setting_value >= 16)
-                        continue;
-                    pwm.off_index = static_cast<std::uint8_t>(command.setting_value);
+                        setting_valid = false;
+                    else
+                        pwm.off_index = static_cast<std::uint8_t>(command.setting_value);
                     break;
                 case 4:
                     if (command.setting_value > 1)
-                        continue;
-                    pwm.on_off = command.setting_value != 0;
+                        setting_valid = false;
+                    else
+                        pwm.on_off = command.setting_value != 0;
                     break;
                 default:
+                    setting_valid = false;
+                    break;
+                }
+                if (!setting_valid) {
+                    report_pwm_result(false);
                     continue;
                 }
                 if (!local_control::valid(next)) {
                     ESP_LOGW(kTag, "Odrzucono sprzeczne ograniczenia PWM kanalu %u",
                              static_cast<unsigned>(command.channel_index + 4));
+                    report_pwm_result(false);
+                    continue;
+                }
+                if (leds_[command.channel_index + 3].operationalStatus() != ESP_OK) {
+                    report_pwm_result(false);
                     continue;
                 }
             } else if (command.kind == ControlCommand::Kind::button_mapping &&
@@ -628,6 +649,7 @@ void LedController::processControlCommands(const std::uint32_t now) noexcept {
                        local_config_revision_ == 0U && local_control::valid(command.local_config)) {
                 next = command.local_config;
             } else {
+                report_pwm_result(false);
                 continue;
             }
             if (!local_control::equal(next, local_config_) || local_config_revision_ == 0U) {
@@ -646,6 +668,7 @@ void LedController::processControlCommands(const std::uint32_t now) noexcept {
                 if (!pwm_ok) {
                     for (std::size_t p = 0; p < 2; ++p)
                         static_cast<void>(leds_[p + 3].configurePwm(local_config_.pwm[p]));
+                    report_pwm_result(false);
                     continue;
                 }
                 local_config_ = next;
@@ -654,6 +677,7 @@ void LedController::processControlCommands(const std::uint32_t now) noexcept {
                     ++local_config_revision_;
                 }
             }
+            report_pwm_result(true);
             continue;
         }
 
@@ -711,7 +735,7 @@ void LedController::processControlCommands(const std::uint32_t now) noexcept {
 esp_err_t LedController::applyControlCommand(const ControlCommand& command,
                                              const std::uint32_t now) noexcept {
 #if LED_CONTROLLER_IR_NEC_ENABLED
-    cancelIrRestoreForChannel(command.channel_index);
+    clearIrNightForChannel(command.channel_index);
 #endif
     manualOverride(command.channel_index);
     LedChannel& led = leds_[command.channel_index];
@@ -767,8 +791,12 @@ void LedController::processIrAction(const IrRemoteAction& action,
         showIrNotice("IR: TRYB RGB", now);
         ESP_LOGI(kTag, "IR: wybrano przyszly sterownik RGB; lokalne komendy IR sa ignorowane");
         return;
-    case IrRemoteAction::Type::master_power:
-        applyIrMasterPower(action, now);
+    case IrRemoteAction::Type::selected_power:
+        applyIrSelectedPower(action, now);
+        return;
+    case IrRemoteAction::Type::power_target_required:
+        showIrNotice("IR: WYBIERZ KANAL", now);
+        ESP_LOGI(kTag, "IR: POWER wymaga wybranego kanalu 1-5");
         return;
     case IrRemoteAction::Type::target_toggle:
         applyIrTargetToggle(action, now);
@@ -824,9 +852,6 @@ void LedController::serviceIrTimers(const std::uint32_t now) noexcept {
 
         ir_timer_active_[index] = false;
         ir_night_active_[index] = false;
-        if (ir_master_off_active_ && ir_master_saved_valid_) {
-            ir_master_saved_on_[index] = false;
-        }
         if (!led_error_reported_[index]) {
             handleIrChannelResult(index, "timer 30 min",
                                   leds_[index].turnOff(now, transition_ticks));
@@ -840,68 +865,37 @@ void LedController::serviceIrTimers(const std::uint32_t now) noexcept {
     }
 }
 
-void LedController::applyIrMasterPower(const IrRemoteAction& action,
-                                       const std::uint32_t now) noexcept {
+void LedController::applyIrSelectedPower(const IrRemoteAction& action,
+                                         const std::uint32_t now) noexcept {
+    if (action.target >= leds_.size()) {
+        showIrNotice("IR: WYBIERZ KANAL", now);
+        ESP_LOGI(kTag, "IR: POWER wymaga wybranego kanalu 1-5");
+        return;
+    }
+
+    const std::size_t index = action.target;
+    if (led_error_reported_[index]) {
+        showIrNotice("IR: BLAD KANALU", now);
+        return;
+    }
+
+    clearIrNightForChannel(index);
+    const bool turn_on = !leds_[index].isOn();
     const std::uint32_t transition_ticks =
         static_cast<std::uint32_t>(pdMS_TO_TICKS(action.transition_ms));
-
-    if (ir_master_off_active_ && ir_master_saved_valid_) {
-        for (std::size_t index = 0; index < leds_.size(); ++index) {
-            if (led_error_reported_[index]) {
-                continue;
-            }
-            esp_err_t result = ESP_OK;
-            if (ir_master_saved_on_[index]) {
-                result = leds_[index].setBrightness(ir_master_saved_brightness_[index], now,
-                                                    transition_ticks);
-                if (result == ESP_OK) {
-                    result = leds_[index].turnOn(now, transition_ticks);
-                }
-            } else {
-                result = leds_[index].turnOff(now, transition_ticks);
-                if (result == ESP_OK) {
-                    result = leds_[index].setBrightness(ir_master_saved_brightness_[index], now,
-                                                        transition_ticks);
-                }
-            }
-            handleIrChannelResult(index, "przywrocenie POWER", result);
-        }
-        ir_master_off_active_ = false;
-        ir_master_saved_valid_ = false;
-        showIrNotice("IR: STAN PRZYWR.", now);
-        ESP_LOGI(kTag, "IR: przywrocono stan kanalow sprzed POWER OFF");
+    const esp_err_t result = turn_on ? leds_[index].turnOn(now, transition_ticks)
+                                     : leds_[index].turnOff(now, transition_ticks);
+    handleIrChannelResult(index, "POWER", result);
+    if (result != ESP_OK) {
         return;
     }
 
-    bool any_on = false;
-    for (const LedChannel& led : leds_) {
-        any_on = any_on || led.isOn();
-    }
-
-    if (any_on) {
-        for (std::size_t index = 0; index < leds_.size(); ++index) {
-            ir_master_saved_on_[index] = leds_[index].isOn();
-            ir_master_saved_brightness_[index] = leds_[index].brightness();
-            if (!led_error_reported_[index]) {
-                handleIrChannelResult(index, "POWER OFF",
-                                      leds_[index].turnOff(now, transition_ticks));
-            }
-        }
-        ir_master_saved_valid_ = true;
-        ir_master_off_active_ = true;
-        showIrNotice("IR: WSZYSTKIE OFF", now);
-        ESP_LOGI(kTag, "IR: wszystkie kanaly -> OFF");
-        return;
-    }
-
-    cancelIrMasterRestore();
-    for (std::size_t index = 0; index < leds_.size(); ++index) {
-        if (!led_error_reported_[index]) {
-            handleIrChannelResult(index, "POWER ON", leds_[index].turnOn(now, transition_ticks));
-        }
-    }
-    showIrNotice("IR: WSZYSTKIE ON", now);
-    ESP_LOGI(kTag, "IR: wszystkie kanaly -> ON");
+    std::array<char, 24> text{};
+    static_cast<void>(std::snprintf(text.data(), text.size(), "IR: KANAL %u %s",
+                                    static_cast<unsigned>(index + 1U), turn_on ? "ON" : "OFF"));
+    showIrNotice(text.data(), now);
+    ESP_LOGI(kTag, "IR: POWER kanal %u -> %s", static_cast<unsigned>(index + 1U),
+             turn_on ? "ON" : "OFF");
 }
 
 void LedController::applyIrTargetToggle(const IrRemoteAction& action,
@@ -913,7 +907,6 @@ void LedController::applyIrTargetToggle(const IrRemoteAction& action,
         }
     }
 
-    cancelIrMasterRestore();
     clearIrNightForTarget(action.target);
     const std::uint32_t transition_ticks =
         static_cast<std::uint32_t>(pdMS_TO_TICKS(action.transition_ms));
@@ -939,7 +932,6 @@ void LedController::applyIrNightToggle(const IrRemoteAction& action,
         }
     }
 
-    cancelIrMasterRestore();
     const std::uint32_t transition_ticks =
         static_cast<std::uint32_t>(pdMS_TO_TICKS(action.transition_ms));
     for (std::size_t index = 0; index < leds_.size(); ++index) {
@@ -983,7 +975,6 @@ void LedController::applyIrNightToggle(const IrRemoteAction& action,
 
 void LedController::applyIrBrightness(const IrRemoteAction& action, const std::uint32_t now,
                                       const bool increase) noexcept {
-    cancelIrMasterRestore();
     clearIrNightForTarget(action.target);
     const std::uint32_t transition_ticks =
         static_cast<std::uint32_t>(pdMS_TO_TICKS(action.transition_ms));
@@ -1048,14 +1039,8 @@ void LedController::handleIrChannelResult(const std::size_t index, const char* c
     latchStatusFault();
 }
 
-void LedController::cancelIrRestoreForChannel(const std::size_t index) noexcept {
-    cancelIrMasterRestore();
+void LedController::clearIrNightForChannel(const std::size_t index) noexcept {
     ir_night_active_[index] = false;
-}
-
-void LedController::cancelIrMasterRestore() noexcept {
-    ir_master_saved_valid_ = false;
-    ir_master_off_active_ = false;
 }
 
 void LedController::clearIrNightForTarget(const std::uint8_t target) noexcept {
@@ -1104,7 +1089,8 @@ bool LedController::irTargetHasManualDimming(const std::uint8_t target) const no
 
 bool LedController::irActionNeedsLedAccess(const IrRemoteAction& action) const noexcept {
     switch (action.type) {
-    case IrRemoteAction::Type::master_power:
+    case IrRemoteAction::Type::selected_power:
+        return action.target < leds_.size();
     case IrRemoteAction::Type::target_toggle:
     case IrRemoteAction::Type::night_toggle:
     case IrRemoteAction::Type::brightness_up:
@@ -1113,6 +1099,7 @@ bool LedController::irActionNeedsLedAccess(const IrRemoteAction& action) const n
     case IrRemoteAction::Type::none:
     case IrRemoteAction::Type::white_role_selected:
     case IrRemoteAction::Type::rgb_role_selected:
+    case IrRemoteAction::Type::power_target_required:
     case IrRemoteAction::Type::target_changed:
     case IrRemoteAction::Type::timer_toggle:
     case IrRemoteAction::Type::transition_changed:

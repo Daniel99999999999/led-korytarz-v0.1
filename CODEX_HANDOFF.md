@@ -1,5 +1,23 @@
 # Handoff dla Codex
 
+## v0.9.1 - obraz do OTA przez GitHub
+
+Wersja `PROJECT_VER` zostala podniesiona do `0.9.1` dla poprawki czerwonego POWER pilota.
+Obraz OTA nalezy zbudowac z profilu `esp32doit-devkit-v1-ota` i opublikowac jako
+`firmware.bin` w publicznym GitHub Release z tagiem `v0.9.1`. Sam build nie publikuje
+Release ani nie aktualizuje ESP32. Przed komenda OTA uploader wymaga lokalnego
+`secrets.ota.json` oraz zgodnosci SHA-256 artefaktu HTTPS z aktualnym buildem.
+Nie wykonano jeszcze publikacji ani testu sprzetowego tej wersji.
+
+## 2026-10-07 — czerwony POWER pilota
+
+Czerwony POWER (NEC `0x45`) przełącza tylko wybrany kanał 1–5, zachowując jego jasność.
+Przy celu `WSZYSTKIE` nie zmienia żadnego kanału i prosi na LCD o wybór kanału.
+Przycisk RGB ON/OFF (`0x47`) nadal przełącza wybrany cel, w tym wszystkie pięć kanałów.
+Usunięto dawny mechanizm wspólnego POWER OFF i odtwarzania całej grupy.
+`check.sh` przeszedł (build ESP32 i testy hostowe). Zmiana nie dotyczy GPIO, polaryzacji
+ani zapisanych ustawień; HIL pozostaje do wykonania.
+
 ## v0.9.0 — PWM4/5 i hotspot lokalnego OTA
 
 Dodano 10 ustawień HA dla kanałów 4/5, osobne timery, walidację ograniczeń i rekord

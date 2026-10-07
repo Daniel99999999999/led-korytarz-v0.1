@@ -111,6 +111,7 @@ class MqttService final {
     esp_err_t disconnect() noexcept;
     esp_err_t clear() noexcept;
     esp_err_t submitSnapshot(const Snapshot& snapshot) noexcept;
+    void recordPwmCommandResult(bool applied) noexcept;
 
     [[nodiscard]] Status status() const noexcept;
     [[nodiscard]] bool tryGetStatus(Status& output) const noexcept;
@@ -247,6 +248,8 @@ class MqttService final {
     std::atomic<bool> connected_{false};
     std::atomic<bool> synchronization_requested_{false};
     std::atomic<bool> publish_backlog_{false};
+    std::atomic<std::uint32_t> accepted_commands_{0};
+    std::atomic<std::uint32_t> rejected_commands_{0};
     Status status_{};
     bool initialized_{false};
     bool started_{false};

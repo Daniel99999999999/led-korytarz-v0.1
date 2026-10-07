@@ -409,6 +409,8 @@ MqttService::Status MqttService::status() const noexcept {
         copy = status_;
     }
     copy.publish_backlog = publish_backlog_.load(std::memory_order_acquire);
+    copy.accepted_commands = accepted_commands_.load(std::memory_order_relaxed);
+    copy.rejected_commands = rejected_commands_.load(std::memory_order_relaxed);
     return copy;
 }
 
@@ -420,6 +422,8 @@ bool MqttService::tryGetStatus(Status& output) const noexcept {
     }
     copy = status_;
     copy.publish_backlog = publish_backlog_.load(std::memory_order_acquire);
+    copy.accepted_commands = accepted_commands_.load(std::memory_order_relaxed);
+    copy.rejected_commands = rejected_commands_.load(std::memory_order_relaxed);
     output = copy;
     return true;
 }
@@ -730,7 +734,6 @@ void MqttService::handleData(const esp_mqtt_event_t& event) noexcept {
             noteRejectedCommand();
             return;
         }
-        noteAcceptedCommand();
         return;
     }
     for (std::size_t index = 0; index < kChannelCount + kPirInputCount; ++index) {
@@ -1628,16 +1631,18 @@ void MqttService::updateStatusFromConfigurationLocked() noexcept {
 }
 
 void MqttService::noteRejectedCommand() noexcept {
-    MutexGuard lock(mutex_);
-    if (lock.locked()) {
-        ++status_.rejected_commands;
-    }
+    rejected_commands_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void MqttService::noteAcceptedCommand() noexcept {
-    MutexGuard lock(mutex_);
-    if (lock.locked()) {
-        ++status_.accepted_commands;
+    accepted_commands_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void MqttService::recordPwmCommandResult(const bool applied) noexcept {
+    if (applied) {
+        noteAcceptedCommand();
+    } else {
+        noteRejectedCommand();
     }
 }
 

@@ -32,11 +32,18 @@ zalecanego dla żarówek Diall ani potwierdzenia ich kompatybilności z PWM zasi
 Kanały 1–3 zachowują timer 0 i dotychczasowe parametry. Kanał 4 używa timera 1,
 a kanał 5 timera 2; źródło APB, bez zmiany GPIO i polaryzacji. Tylko zadanie kontrolera
 modyfikuje LEDC. Błąd ustawienia sprzętu zatrzaskuje dany kanał w stanie OFF do restartu.
+Przy błędzie sterownik próbuje zatrzymać LEDC i przełączyć pin na GPIO LOW. Gdy operacje
+GPIO zgłoszą błąd, stan fizycznego wyjścia wymaga pomiaru; próba awaryjnego LOW nie
+zastępuje zabezpieczeń elektrycznych.
+Dalsze komendy PWM do kanału z zatrzaśniętą awarią są odrzucane.
 
 MQTT: `<base>/config/pwm/{4|5}/{frequency|minimum|on_us|off_us|mode}/set`.
 Potwierdzenia na identycznej ścieżce zakończonej `/state`. Komendy bez retain;
 stan potwierdzony retain, publikowany różnicowo. `on_us`/`off_us` przyjmują czas z listy,
 `mode` przyjmuje dokładnie `PWM` albo `ON/OFF`.
+Licznik przyjętych komend PWM rośnie dopiero po decyzji kontrolera. Sprzeczna konfiguracja
+lub błąd zastosowania zwiększa licznik odrzuconych komend; samo dodanie do kolejki nie
+jest jeszcze potwierdzeniem.
 
 ## Pamięć
 

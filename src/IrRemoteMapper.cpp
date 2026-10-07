@@ -27,11 +27,11 @@ IrRemoteAction IrRemoteMapper::process(const nec_remote::Frame& frame,
     }
 
     switch (command) {
-    case Command::power: {
-        IrRemoteAction action = makeAction(IrRemoteAction::Type::master_power);
-        action.target = IrRemoteAction::kAllChannelsTarget;
-        return action;
-    }
+    case Command::power:
+        if (selected_target_ == IrRemoteAction::kAllChannelsTarget) {
+            return makeAction(IrRemoteAction::Type::power_target_required);
+        }
+        return makeAction(IrRemoteAction::Type::selected_power);
     case Command::rgb_toggle:
         return makeAction(IrRemoteAction::Type::target_toggle);
     case Command::night_mode:
