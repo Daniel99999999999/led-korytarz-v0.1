@@ -24,6 +24,20 @@ który różni się od fabrycznych sdkconfig.defaults. To nie jest kopia NVS ani
 
 ## OTA
 
+Jednym lokalnym poleceniem po commit i push mozna przygotowac wydanie i
+uruchomic OTA: `python scripts/publish_ota.py --mqtt-host 192.168.1.130`.
+Skrypt uzywa istniejacego logowania Git Credential Manager; nie kopiuje
+jego tokenu do Actions. Sam bierze PROJECT_VER, pakuje firmware.bin,
+release.json i SHA256SUMS, publikuje Release, wypycha tag i zleca OTA.
+`secrets.ota.json` pozostaje ignorowany i przechowuje dane MQTT. Stale
+`firmware_repo` zastepuje recznie zmieniany URL; skrypt aktualizuje to pole.
+Opcja `--publish-only` zatrzymuje sie przed komenda do ESP32. Gdy wydanie
+istnieje, skrypt sprawdza commit oraz hash publicznego obrazu i nie nadpisuje go.
+
+Workflow GitHub Actions jest alternatywa. Do samodzielnej publikacji wymaga
+wasnego fine-grained RELEASE_REPO_TOKEN; jesli lokalny skrypt opublikowal
+wydanie przed pushem tagu, workflow weryfikuje je bez sekretu.
+
 Prywatne repozytorium źródeł nie zapewnia publicznego URL do firmware.
 Obecny firmware nie uwierzytelnia pobrań z prywatnych GitHub Releases.
 Osobne publiczne repozytorium `led-korytarz-firmware` zawiera wyłącznie wydania.

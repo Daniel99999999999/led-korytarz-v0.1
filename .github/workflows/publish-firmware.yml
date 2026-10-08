@@ -57,9 +57,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ github.sha }}
         run: |
+          public_manifest="https://github.com/Daniel99999999999/led-korytarz-firmware/releases/download/${RELEASE_TAG}/release.json"
+          if curl -fsSL "$public_manifest" -o .pio/release/public-release.json 2>/dev/null; then
+            echo "Release already published; verifying source commit and image"
+            PYTHONPATH=scripts python - <<'PY'
+          import os
+          from publish_ota import RELEASE_REPO, verify_published_release
+          verify_published_release(
+              os.environ["RELEASE_TAG"], os.environ["SOURCE_COMMIT"],
+              {"artifact_source": "release", "firmware_repo": RELEASE_REPO},
+          )
+          PY
+            exit 0
+          fi
           if [ -z "$GH_TOKEN" ]; then
-            echo "Missing RELEASE_REPO_TOKEN repository secret" >&2
+            echo "Release missing and RELEASE_REPO_TOKEN not configured" >&2
+            echo "Run scripts/publish_ota.py locally with GitHub login" >&2
             exit 1
           fi
           gh release create "$RELEASE_TAG" \

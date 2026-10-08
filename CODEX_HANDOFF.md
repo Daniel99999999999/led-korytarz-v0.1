@@ -7,8 +7,10 @@ Biezaca wersja zrodel to `0.10.3`. `0.10.1` na urzadzeniu wpadla w bootloop
 HTTPS, zmiany hasla, Wi-Fi, MQTT i NTP bez widocznego restartu. `0.10.3`
 usuwa cykliczne ostrzezenie biblioteki przy pustej magistrali 1-Wire
 oraz ogranicza jednoczesne sesje HTTPS po bledzie alokacji MbedTLS -0x008D.
-Publikacja OTA przez tag jest przygotowana, ale nie uruchomiona i wymaga sekretu
-GitHub `RELEASE_REPO_TOKEN`. Nie wgrywac starego obrazu `0.10.1` ani nie
+Lokalny skrypt `scripts/publish_ota.py` moze opublikowac wydanie przez Git
+Credential Manager bez sekretu `RELEASE_REPO_TOKEN`; workflow tagu weryfikuje
+wtedy juz opublikowany Release. Samodzielna publikacja przez Actions nadal
+wymaga wasko ograniczonego sekretu. Nie wgrywac starego obrazu `0.10.1` ani nie
 zakladac, ze log 0.10.2 potwierdzil margines stosu lub dluzsza stabilnosc.
 
 ## v0.9.1 - obraz do OTA przez GitHub

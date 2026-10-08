@@ -9,6 +9,22 @@ Aktualizacja firmware - trzy sposoby (przyklad: wersja 0.10.3)
 
 SPOSOB 1 - MQTT + HTTPS/GitHub
 
+Z tego komputera caly sposob 1 wykonuje jeden skrypt (po commit i push
+zrodel), korzystajac z logowania zapisanego w Git Credential Manager:
+   & "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" scripts/publish_ota.py --mqtt-host 192.168.1.130
+Skrypt buduje profil OTA, publikuje Release, wypycha tag zrodel, sprawdza
+publiczny obraz i uruchamia OTA przez broker. Nie wymaga kopiowania tokenu
+GCM do GitHub Actions. Przy nastepnym wydaniu sam bierze nowy PROJECT_VER
+i wylicza URL; login/haslo MQTT pozostaja w secrets.ota.json. Opcja
+--publish-only publikuje bez komendy OTA. Nie uruchamiaj dwoch kopii naraz.
+Zamknij karty panelu HTTPS ESP32 przed OTA z 0.10.2.
+
+Alternatywa: workflow GitHub Actions po pushu tagu. Wymaga jednorazowo
+ustawionego, wasko ograniczonego RELEASE_REPO_TOKEN; jesli lokalny skrypt
+opublikowal juz wydanie, workflow tylko je weryfikuje.
+
+Ponizsze szczegolowe kroki reczne dotycza tej alternatywy GitHub Actions.
+
 Jednorazowo na GitHub:
 1. Publiczne repo Daniel99999999999/led-korytarz-firmware musi miec
    galaz domyslna. Jesli jest puste, dodaj w nim README.
@@ -30,8 +46,8 @@ Kazde nowe wydanie (ponizej konkretnie 0.10.3):
    i sprawdz firmware.bin, release.json oraz SHA256SUMS.
    GitHub Actions wysyla te pliki automatycznie; nie wysylaj .bin recznie.
    Nie uruchamiaj OTA, jezeli workflow lub Release sie nie powiodly.
-4. W lokalnym, ignorowanym przez Git pliku secrets.ota.json ustaw:
-      "firmware_url": "https://github.com/Daniel99999999999/led-korytarz-firmware/releases/download/v0.10.3/firmware.bin",
+4. Lokalny skrypt sam ustawia w ignorowanym pliku secrets.ota.json:
+      "firmware_repo": "Daniel99999999999/led-korytarz-firmware",
       "artifact_source": "release",
       "publish_path": null,
       "mqtt_host": "192.168.1.130"
@@ -55,7 +71,8 @@ Kazde nowe wydanie (ponizej konkretnie 0.10.3):
    https://192.168.1.50/ (lub przez UART). Pierwsze OTA 0.10.3 jest
    testem sprzetowym: samo przejscie builda nie potwierdza aktualizacji.
 
-Przy kolejnym wydaniu zamien numer wersji w commicie, tagu i URL.
+Przy kolejnym wydaniu zmien PROJECT_VER, wykonaj commit i push, po czym
+uruchom ten sam skrypt. Nie trzeba edytowac URL ani tagu recznie.
 Skrypt ma tez tryb "artifact_source": "local" dla wlasnego serwera
 HTTPS, ale wymaga zgodnego SHA-256 lokalnego i opublikowanego obrazu.
 Obecnie uzywamy trybu "release". Szczegoly: docs/GITHUB.md.

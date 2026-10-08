@@ -72,6 +72,28 @@ def validate_ota_url(url: str) -> None:
         raise OtaUploadError("URL OTA przekracza limit %u bajtow" % MAX_OTA_URL_LENGTH)
 
 
+def firmware_url_for_version(config: Dict[str, Any], version: str) -> str:
+    repo = config.get("firmware_repo")
+    if repo is not None:
+        if "firmware_url" in config:
+            raise OtaUploadError("Uzyj firmware_repo albo firmware_url, nie obu pol")
+        if not isinstance(repo, str) or re.fullmatch(
+            r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", repo
+        ) is None:
+            raise OtaUploadError("firmware_repo musi miec postac owner/repo")
+        if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+            raise OtaUploadError("Wersja obrazu nie nadaje sie do tagu Release")
+        if config.get("artifact_source") != "release":
+            raise OtaUploadError("firmware_repo wymaga artifact_source: release")
+        url = "https://github.com/%s/releases/download/v%s/firmware.bin" % (
+            repo, version
+        )
+    else:
+        url = require_string(config, "firmware_url")
+    validate_ota_url(url)
+    return url
+
+
 def publish_local_artifact(source: Path, configured_target: Any) -> None:
     if configured_target is None:
         return
@@ -487,8 +509,7 @@ def main() -> int:
     digest = hashlib.sha256(image).hexdigest()
     print("OTA: obraz %s, wersja %s, %u B" % (project, version, len(image)))
 
-    base_url = require_string(config, "firmware_url")
-    validate_ota_url(base_url)
+    base_url = firmware_url_for_version(config, version)
     artifact_source = config.get("artifact_source", "local")
     if artifact_source == "release":
         if config.get("publish_path") is not None:

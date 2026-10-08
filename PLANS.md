@@ -1,5 +1,24 @@
 # Execution Plans
 
+## 2026-10-08 - Jednym skryptem: wydanie GitHub i MQTT OTA
+
+- [x] Sprawdzono: origin/main odpowiada lokalnemu commitowi, broker slucha na
+  192.168.1.130, a ESP32 ma aktywne polaczenie TCP z brokerem.
+- [x] Sprawdzono: publiczne repo firmware istnieje, ale nie ma v0.10.3;
+  w prywatnym repo brak sekretu RELEASE_REPO_TOKEN.
+- [x] Uploader wyprowadza URL Release z wersji obrazu i stalej nazwy repo.
+- [x] Jeden lokalny skrypt buduje, pakuje, publikuje i uruchamia OTA, bez
+  kopiowania szerokiego tokenu GCM do GitHub Actions.
+- [x] Testy skryptu (10), check.sh, build profilu OTA i polaczenie z brokerem.
+- [ ] Publikacja v0.10.3, weryfikacja Release i sprzetowe potwierdzenie OTA.
+
+Skrypt ma zachowac dane MQTT tylko w ignorowanym secrets.ota.json i nie
+nadpisywac opublikowanego wydania ani tagu wskazujacego inny commit.
+check.sh PASS (10 testow skryptu, build ESP32, host i adaptery), profil OTA
+PASS: 1 378 337 B flash. Lokalny broker 192.168.1.130 przyjal logowanie
+skryptu; retained OTA status ESP32: idle, wersja 0.10.2. GitHub API Python
+potwierdzilo logowanie bez wypisywania tokenu.
+
 Ten plik jest żywym planem prac. Codex aktualizuje go przy zadaniach obejmujących wiele plików lub etapów. Plan ma być samowystarczalny: osoba czytająca repozytorium powinna rozumieć cel, postęp, decyzje i sposób walidacji bez historii czatu.
 
 ## Etap v0.8.2 zakończony w kodzie, oczekuje HIL: diagnostyka startowa bez konsoli RX
