@@ -10,6 +10,7 @@
 #include "WifiService.hpp"
 #include "cJSON.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_https_server.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -148,6 +149,19 @@ void WebDiagnosticsService::refreshSessionToken() noexcept {
     token.fill(0);
 }
 
+void WebDiagnosticsService::logHeapStatus() noexcept {
+    constexpr std::int64_t kIntervalUs = 60LL * 1000LL * 1000LL;
+    const std::int64_t now_us = esp_timer_get_time();
+    if (last_heap_log_us_ != 0 && now_us - last_heap_log_us_ < kIntervalUs)
+        return;
+    constexpr std::uint32_t kCaps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    ESP_LOGI(kTag, "HTTPS RAM: wolne=%u B, najwiekszy blok=%u B, minimum=%u B",
+             static_cast<unsigned>(heap_caps_get_free_size(kCaps)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(kCaps)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(kCaps)));
+    last_heap_log_us_ = now_us;
+}
+
 esp_err_t WebDiagnosticsService::start() noexcept {
     if (!initialized_)
         return ESP_ERR_INVALID_STATE;
@@ -155,7 +169,8 @@ esp_err_t WebDiagnosticsService::start() noexcept {
         return ESP_OK;
     httpd_ssl_config_t config = HTTPD_SSL_CONFIG_DEFAULT();
     config.httpd.stack_size = 12288;
-    config.httpd.max_open_sockets = 2;
+    config.httpd.max_open_sockets = 1;
+    config.httpd.lru_purge_enable = true;
     config.httpd.max_uri_handlers = 7;
     config.httpd.recv_wait_timeout = 3;
     config.httpd.send_wait_timeout = 3;
@@ -388,6 +403,7 @@ esp_err_t WebDiagnosticsService::status(httpd_req_t* request) {
     auto& service = *static_cast<WebDiagnosticsService*>(request->user_ctx);
     if (!service.authorized(request))
         return ESP_OK;
+    service.logHeapStatus();
     JsonOwner root(cJSON_CreateObject());
     if (!root.get())
         return unavailable(request, "Brak pamieci");

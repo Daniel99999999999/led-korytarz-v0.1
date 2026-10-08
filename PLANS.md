@@ -1006,3 +1006,29 @@ Nie zmieniac GPIO, przypisan czujnikow ani ustawien EEPROM. Wydanie OTA po
 tagu `v0.10.3` dopiero po potwierdzeniu stabilnosci urzadzenia.
 `check.sh`: 6/6 testow skryptow, 2/2 testy hostowe i build bazowy PASS.
 Profil OTA: PASS, deskryptor `led_controller/0.10.3`, obraz 1 377 952 B.
+
+Instrukcja publikacji Release i uruchomienia OTA dla uzytkownika jest w `ota.txt`.
+Pierwszy przebieg GitHub Actions oraz rzeczywiste OTA nadal wymagaja HIL.
+`ota.txt` obejmuje teraz trzy drogi aktualizacji: MQTT/HTTPS, hotspot
+z LCD oraz przewodowy upload USB z reczna sekwencja BOOT/EN po usunieciu
+tranzystora automatycznego resetu; panel HTTPS pozostaje diagnostyczny.
+Zmiana dokumentacyjna: `check_utf8.py` PASS (157 plikow),
+`test_release_artifact.py` PASS (6 testow). W tym uruchomieniu `check.sh`
+nie wystartowal (Git Bash: Win32 error 5), a PlatformIO nie moglo utworzyc
+`C:\Users\Daniel\.platformio\platforms.lock` z powodu uprawnien sandboxa.
+Poprzedni build 0.10.3, opisany wyzej, nie zostal zmieniony przez `ota.txt`.
+
+## 2026-10-08 - v0.10.3: pamiec sesji HTTPS
+
+- [x] Zidentyfikowac `-0x008D` jako brak pamieci przy `mbedtls_ssl_setup`.
+- [x] Ograniczyc panel do jednej sesji HTTPS i wlaczyc zamykanie LRU.
+- [x] Dodac ograniczony do 1/min log wolnej, minimalnej i najwiekszej
+  wewnetrznej pamieci 8-bit przy uzywaniu panelu.
+- [x] Powtorzyc build i testy po zmianie kodu.
+- [ ] HIL: jedna/wiele kart, 30+ min, log RAM, brak resetu i dostepnosc panelu.
+
+Globalne bufory MbedTLS pozostaja bez zmian, aby nie naruszyc pobierania
+obrazu OTA przez HTTPS. Brak nowego testu sprzetowego; 0.10.2 nadal ma
+powtarzajace sie bledy alokacji podczas nowych polaczen TLS.
+`check.sh`: UTF-8 157/157, skrypty wydania 6/6, CTest 2/2 i build bazowy PASS.
+Profil OTA: PASS, obraz 1 378 768 B, `led_controller/0.10.3`.

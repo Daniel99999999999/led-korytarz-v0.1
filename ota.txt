@@ -1,0 +1,116 @@
+Aktualizacja firmware - trzy sposoby (przyklad: wersja 0.10.3)
+
+1. MQTT + HTTPS/GitHub: zdalnie, bez kabla i LCD; wymaga brokera
+   dostepnego dla komputera i ESP32 oraz internetu dla pobrania obrazu.
+2. Hotspot sterownika: lokalnie, bez brokera i internetu; wymaga LCD
+   do odczytania hasla, telefonu/laptopa oraz pliku firmware.bin.
+3. USB: programowanie przewodowe przez bootloader ESP32; metoda
+   awaryjna, nie jest OTA. Wymaga bezpiecznego odseparowania zasilania.
+
+SPOSOB 1 - MQTT + HTTPS/GitHub
+
+Jednorazowo na GitHub:
+1. Publiczne repo Daniel99999999999/led-korytarz-firmware musi miec
+   galaz domyslna. Jesli jest puste, dodaj w nim README.
+2. Utworz fine-grained personal access token: dostep tylko do repo
+   led-korytarz-firmware, uprawnienie Contents: Read and write.
+3. W PRYWATNYM repo zrodel led-korytarz-v0.1 dodaj ten token jako
+   Settings > Secrets and variables > Actions > New repository secret,
+   nazwa RELEASE_REPO_TOKEN. Nie zapisuj tokenu w kodzie ani tutaj.
+
+Kazde nowe wydanie (ponizej konkretnie 0.10.3):
+1. Sprawdz PROJECT_VER w CMakeLists.txt. Zrob commit i push zrodel.
+   Opis commitu moze brzmiec "0.10.3"; nie steruje on publikacja.
+2. W terminalu PowerShell w katalogu projektu utworz i wypchnij tag:
+      git tag -a v0.10.3 -m "Firmware 0.10.3"
+      git push origin v0.10.3
+   To TAG musi miec prefiks v i wskazywac commit z wersja 0.10.3.
+3. W prywatnym repo sprawdz Actions > Publish OTA firmware. Poczekaj
+   na zielony wynik. W publicznym repo otworz Releases > v0.10.3
+   i sprawdz firmware.bin, release.json oraz SHA256SUMS.
+   GitHub Actions wysyla te pliki automatycznie; nie wysylaj .bin recznie.
+   Nie uruchamiaj OTA, jezeli workflow lub Release sie nie powiodly.
+4. W lokalnym, ignorowanym przez Git pliku secrets.ota.json ustaw:
+      "firmware_url": "https://github.com/Daniel99999999999/led-korytarz-firmware/releases/download/v0.10.3/firmware.bin",
+      "artifact_source": "release",
+      "publish_path": null,
+      "mqtt_host": "192.168.1.130"
+   Zachowaj poprawne lokalne mqtt_username, mqtt_password, mqtt_port,
+   topic_prefix=sterownik-led i device_id=sterownik_led_582abd7c8874.
+   Adres .130 dotyczy obecnego lokalnego brokera; przy innej sieci
+   wpisz adres brokera, z ktorym laczy sie ESP32.
+5. Upewnij sie, ze komputer laczy sie z brokerem, a ESP32 ma dostep do
+   tego brokera i do publicznego GitHub przez HTTPS. W PlatformIO wybierz
+   srodowisko esp32doit-devkit-v1-ota i kliknij Upload. Odpowiednik
+   z terminala PowerShell w katalogu projektu:
+      & "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32doit-devkit-v1-ota -t upload
+   Przed pierwszym OTA z 0.10.2 zamknij karty panelu HTTPS sterownika
+   i nie otwieraj ich podczas pobierania obrazu: sesje TLS zajmuja RAM.
+6. Uploader sprawdza Release, po czym sam wysyla adres obrazu do MQTT
+   na temat sterownik-led/sterownik_led_582abd7c8874/ota/set.
+   Mosquitto nie aktualizuje urzadzenia sam: przekazuje tylko komende;
+   ESP32 pobiera firmware.bin przez HTTPS, uruchamia go i potwierdza.
+   Czekaj na komunikat "wersja 0.10.3 uruchomiona i zatwierdzona".
+7. Sprawdz wersje i dzialanie lokalnego sterowania w panelu ESP32
+   https://192.168.1.50/ (lub przez UART). Pierwsze OTA 0.10.3 jest
+   testem sprzetowym: samo przejscie builda nie potwierdza aktualizacji.
+
+Przy kolejnym wydaniu zamien numer wersji w commicie, tagu i URL.
+Skrypt ma tez tryb "artifact_source": "local" dla wlasnego serwera
+HTTPS, ale wymaga zgodnego SHA-256 lokalnego i opublikowanego obrazu.
+Obecnie uzywamy trybu "release". Szczegoly: docs/GITHUB.md.
+
+SPOSOB 2 - lokalny hotspot z LCD (bez GitHub/MQTT)
+
+1. Przygotuj SAM plik aplikacji firmware.bin nowej wersji: pobierz go
+   z publicznego Release albo zbuduj w PlatformIO srodowisko
+   esp32doit-devkit-v1-ota przez Build (nie Upload). Lokalny plik
+   znajdziesz w .pio/build/esp32doit-devkit-v1-ota/firmware.bin.
+   Nie wybieraj bootloader.bin, partitions.bin ani laczonego obrazu flash.
+2. Po uruchomieniu sterownika przytrzymaj dedykowany przycisk LCD
+   na GPIO19 przez 10 s. Jezeli byl wcisniety juz przy starcie,
+   najpierw go pusc i wcisnij ponownie.
+3. Z LCD odczytaj SSID LED-OTA-xxxxxx, losowe haslo i adres HTTP.
+   Polacz telefon/laptop z tym Wi-Fi; brak internetu jest normalny.
+   Bez dzialajacego LCD nie odczytasz hasla, wiec ta metoda odpada.
+4. Otworz w przegladarce adres z LCD: zwykle http://192.168.4.1,
+   przy kolizji adresow http://10.42.0.1. Uzyj HTTP, nie HTTPS.
+   Strona dziala tylko przez hotspot ESP32, nie przez jego zwykle
+   IP w sieci domowej. Haslo Wi-Fi i token strony chronia sesje.
+5. Wybierz firmware.bin, kliknij Aktualizuj i nie odlaczaj zasilania.
+   Po poprawnym zapisie sterownik sam sie zrestartuje. Sprawdz wersje
+   po powrocie do sieci. Hotspot gasnie po 10 min bez uploadu;
+   ponowne przytrzymanie na 10 s otwiera nowa sesje.
+
+SPOSOB 3 - USB/bootloader ESP32 (nie OTA)
+
+1. Zamknij monitor portu, PuTTY i inne programy korzystajace z COM.
+   Wylacz zasilanie zewnetrzne PCB. Przed podlaczeniem USB ustaw
+   zworke zasilania w pozycji USB i upewnij sie, ze zasilanie EXT
+   nie moze podac napiecia na linie USB/ESP32. Nie podlaczaj USB
+   rownoczesnie z aktywnym EXT: w tej konstrukcji grozi to zwarciem.
+2. Podlacz wbudowane USB plytki ESP32. Sprawdz numer portu COM
+   (platformio.ini ma obecnie COM4). W PlatformIO wybierz srodowisko
+   esp32doit-devkit-v1 i kliknij Upload, albo uzyj w PowerShell:
+      & "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32doit-devkit-v1 -t upload
+3. Na TEJ plytce tranzystor automatycznego resetu EN jest wylutowany.
+   Gdy esptool wypisze "Connecting...", trzymaj BOOT, nacisnij
+   i pusc EN, nadal trzymaj BOOT. Pusc BOOT dopiero gdy esptool
+   nawiaze polaczenie (np. pokaze "Chip is ESP32"/zacznie zapis).
+   Nie trzymaj EN przez caly upload. Po zakonczeniu w razie potrzeby
+   nacisnij EN raz, aby uruchomic program.
+4. Odlacz USB PRZED przelaczeniem zworki na EXT i wlaczeniem
+   zasilania zewnetrznego. Sprawdz start, wersje i sterowanie lokalne.
+   Nie uzywaj "erase_flash", jesli chcesz zachowac klucz NVS.
+
+Uwaga: UART aplikacji odbiera komendy na GPIO39/VN, ale ROM bootloader
+programuje sie przez standardowe RX0/GPIO3 wbudowanego USB. Profil
+esp32doit-devkit-v1-ota i jego przycisk Upload uruchamiaja sposob 1,
+nie programowanie przez USB.
+
+HTTP A HTTPS: brak logowania pod http://<IP sterownika> jest celowy.
+Panel statusu i logow dziala tylko pod https://<IP sterownika>/
+lub https://sterownik-led.local/ na porcie 443. Samopodpisany certyfikat
+powoduje ostrzezenie przegladarki; po IP moze dojsc niezgodnosc nazwy.
+HTTP na porcie 80 sluzy wylacznie stronie OTA aktywnego hotspotu.
+Panel diagnostyczny HTTPS nie przyjmuje obecnie pliku firmware.bin.

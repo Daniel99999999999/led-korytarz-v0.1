@@ -5,7 +5,8 @@
 Biezaca wersja zrodel to `0.10.3`. `0.10.1` na urzadzeniu wpadla w bootloop
 (`stack overflow in task main`). W `0.10.2` uzytkownik potwierdzil dzialanie
 HTTPS, zmiany hasla, Wi-Fi, MQTT i NTP bez widocznego restartu. `0.10.3`
-usuwa cykliczne ostrzezenie biblioteki przy pustej magistrali 1-Wire.
+usuwa cykliczne ostrzezenie biblioteki przy pustej magistrali 1-Wire
+oraz ogranicza jednoczesne sesje HTTPS po bledzie alokacji MbedTLS -0x008D.
 Publikacja OTA przez tag jest przygotowana, ale nie uruchomiona i wymaga sekretu
 GitHub `RELEASE_REPO_TOKEN`. Nie wgrywac starego obrazu `0.10.1` ani nie
 zakladac, ze log 0.10.2 potwierdzil margines stosu lub dluzsza stabilnosc.
@@ -366,3 +367,11 @@ biblioteka wypisywala ostrzezenie co 30 s. Skan najpierw sprawdza impuls
 obecnosci bez logowania, a dopiero potem uruchamia iterator ROM. Inne bledy
 1-Wire sa nadal raportowane. Test na ESP32 z pustym GPIO4 oraz z podlaczonym
 DS18B20 pozostaje do wykonania.
+
+Dalszy log 0.10.2 pokazal `mbedtls_ssl_setup -0x008D`, czyli
+`PSA_ERROR_INSUFFICIENT_MEMORY` przy alokacji sesji HTTPS. 0.10.3 ogranicza
+panel do jednej sesji, wlacza zamykanie LRU oraz podaje w logu `HTTPS RAM`
+wolny wewnetrzny RAM i najwiekszy blok przy odczycie statusu co najwyzej raz
+na minute. Nie zmieniono globalnych buforow TLS ani kodu OTA. Pelny
+`check.sh` i build profilu OTA PASS; dlugi test HTTPS oraz pierwsze OTA
+na sprzecie pozostaja do wykonania.

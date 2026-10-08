@@ -35,6 +35,7 @@ class WebDiagnosticsService final {
     bool authorized(httpd_req_t* request, bool allow_setup = false) noexcept;
     bool commandAuthorized(httpd_req_t* request) noexcept;
     void refreshSessionToken() noexcept;
+    void logHeapStatus() noexcept;
     esp_err_t registerRoutes() noexcept;
     static void setResponseHeaders(httpd_req_t* request) noexcept;
 
@@ -51,6 +52,7 @@ class WebDiagnosticsService final {
     std::array<char, 8192> response_buffer_{};
     std::int64_t locked_until_us_{0};
     std::int64_t session_deadline_us_{0};
+    std::int64_t last_heap_log_us_{0};
     unsigned failed_logins_{0};
     bool session_issued_{false};
     bool initialized_{false};

@@ -73,3 +73,14 @@ dluzsza prace. `-0x7780` podczas TLS oznacza alarm od klienta, mozliwy przy
 odrzuceniu samopodpisanego certyfikatu; pojedyncze 404 dla `/favicon.ico` jest
 nieszkodliwym zadaniem przegladarki. `0.10.3` usuwa okresowe ostrzezenie
 `1-wire.device` przy pustej magistrali; wymaga testu z czujnikiem i bez niego.
+
+Log z 0.10.2 po dluzszym otwarciu panelu pokazal takze
+`mbedtls_ssl_setup returned -0x008D`. W uzywanej wersji MbedTLS jest to
+`PSA_ERROR_INSUFFICIENT_MEMORY` (-141): zabraklo pamieci dla nowej sesji TLS,
+nie jest to blad certyfikatu. `0.10.3` ogranicza panel do jednej sesji HTTPS
+i zamyka najmniej niedawno uzywana sesje przed przyjeciem kolejnej. Log
+`HTTPS RAM` podaje wolny wewnetrzny RAM 8-bit, najwiekszy dostepny blok i
+minimum, przy pierwszym odczycie statusu i dalej najwyzej raz na minute.
+Nie zmieniano globalnych buforow MbedTLS, od ktorych zalezy takze OTA GitHub.
+HIL: zostawic jedna i kilka kart panelu na co najmniej 30 min, sprawdzic
+logi RAM, bledy TLS, dostep do statusu i dzialanie lokalnych przyciskow.
