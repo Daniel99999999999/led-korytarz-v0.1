@@ -50,6 +50,20 @@ bool DebugLog::pop(DebugBuffer::Message& value) noexcept {
     busy_.clear(std::memory_order_release);
     return available;
 }
+bool DebugLog::nextWebEntry(const std::uint32_t after, WebLogBuffer::Entry& output,
+                            bool& gap) noexcept {
+    if (busy_.test_and_set(std::memory_order_acquire))
+        return false;
+    const bool available = web_buffer_.nextAfter(after, output, gap);
+    busy_.clear(std::memory_order_release);
+    return available;
+}
+void DebugLog::setUartEnabled(const bool enabled) noexcept {
+    uart_enabled_.store(enabled, std::memory_order_release);
+}
+bool DebugLog::uartEnabled() const noexcept {
+    return uart_enabled_.load(std::memory_order_acquire);
+}
 void DebugLog::noteTransportDrop() noexcept {
     adapter_dropped_.fetch_add(1, std::memory_order_relaxed);
 }
@@ -58,25 +72,30 @@ void DebugLog::excludePublisherTask(TaskHandle_t task) noexcept {
 }
 int DebugLog::output(const char* format, va_list args) {
     auto& logger = instance();
-    va_list uart_args;
-    va_copy(uart_args, args);
-    const int result = logger.previous_.load(std::memory_order_acquire)(format, uart_args);
-    va_end(uart_args);
+    const bool uart_enabled = logger.uartEnabled();
+    int result = 0;
+    if (uart_enabled) {
+        va_list uart_args;
+        va_copy(uart_args, args);
+        result = logger.previous_.load(std::memory_order_acquire)(format, uart_args);
+        va_end(uart_args);
+    }
     // ESP_LOG is not an ISR API. Do not add formatting/queue work to such a call.
-    if (!xPortInIsrContext() && logger.capture_enabled_.load(std::memory_order_acquire) &&
-        xTaskGetCurrentTaskHandle() != logger.publisher_.load(std::memory_order_relaxed)) {
+    if (!xPortInIsrContext()) {
         va_list copy;
         va_copy(copy, args);
-        logger.capture(format, copy);
+        const int captured = logger.capture(format, copy);
         va_end(copy);
+        if (!uart_enabled)
+            result = captured;
     }
     return result;
 }
-void DebugLog::capture(const char* format, va_list args) noexcept {
+int DebugLog::capture(const char* format, va_list args) noexcept {
     DebugBuffer::Message text{};
     const int written = std::vsnprintf(text.data(), text.size(), format, args);
     if (written <= 0) {
-        return;
+        return written;
     }
     // ASCII transport: remove control/ANSI bytes, preserve line breaks. Never emit broken UTF-8.
     std::size_t end = 0;
@@ -100,13 +119,18 @@ void DebugLog::capture(const char* format, va_list args) noexcept {
     text[end] = '\0';
     if (busy_.test_and_set(std::memory_order_acquire)) {
         noteTransportDrop();
-        return;
+        return written;
     }
-    if (static_cast<std::size_t>(written) >= text.size()) {
-        buffer_.noteDropped();
+    web_buffer_.push(text.data());
+    if (capture_enabled_.load(std::memory_order_acquire) &&
+        xTaskGetCurrentTaskHandle() != publisher_.load(std::memory_order_relaxed)) {
+        if (static_cast<std::size_t>(written) >= text.size()) {
+            buffer_.noteDropped();
+        }
+        static_cast<void>(buffer_.push(text.data(), seconds()));
     }
-    static_cast<void>(buffer_.push(text.data(), seconds()));
     busy_.clear(std::memory_order_release);
+    return written;
 }
 const char* DebugLog::resetReason() noexcept {
     switch (esp_reset_reason()) {

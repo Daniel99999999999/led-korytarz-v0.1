@@ -1,6 +1,7 @@
 #include "ServiceConsole.hpp"
 
 #include "BoardConfig.hpp"
+#include "DebugLog.hpp"
 #include "DeviceIdentity.hpp"
 #if LED_CONTROLLER_INA228_ENABLED
 #include "Ina228Scaling.hpp"
@@ -30,7 +31,7 @@ static_assert(CONFIG_ESP_CONSOLE_UART_NUM == 0, "Konsola serwisowa wymaga UART0"
 constexpr char kWifiCommandHelp[] = "Konfiguracja Wi-Fi z szyfrowanym zapisem w AT24C08N";
 constexpr char kMqttCommandHelp[] = "Konfiguracja MQTT z szyfrowanym zapisem w AT24C08N";
 constexpr char kSettingsCommandHelp[] = "Szyfrowane ustawienia w opcjonalnym AT24C08N";
-constexpr char kSettingsCommandHint[] = "<help|status|save|reload|clear|ina-cal>";
+constexpr char kSettingsCommandHint[] = "<help|status|save|reload|clear|ina-cal|web-password>";
 #else
 constexpr char kWifiCommandHelp[] = "Konfiguracja testowego Wi-Fi przechowywana tylko w RAM";
 constexpr char kMqttCommandHelp[] = "Konfiguracja testowego MQTT przechowywana tylko w RAM";
@@ -39,6 +40,8 @@ constexpr char kWifiCommandHint[] =
     "<help|scan|ssid|password|mode|static|dns|apply|status|disconnect|clear>";
 constexpr char kMqttCommandHint[] =
     "<help|uri|username|password|topic|discovery|apply|status|disconnect|clear>";
+constexpr char kLogsCommandHelp[] = "Logi ESP_LOG na UART (bufory WWW/MQTT pozostaja aktywne)";
+constexpr char kLogsCommandHint[] = "<status|on|off>";
 #if LED_CONTROLLER_INA228_ENABLED
 constexpr char kIna228CommandHelp[] = "Diagnostyka opcjonalnego monitora energii INA228";
 constexpr char kIna228CommandHint[] = "<help|status>";
@@ -163,6 +166,17 @@ esp_err_t ServiceConsole::initialize() noexcept {
         return result;
     }
 
+    esp_console_cmd_t logs_command{};
+    logs_command.command = "logs";
+    logs_command.help = kLogsCommandHelp;
+    logs_command.hint = kLogsCommandHint;
+    logs_command.func_w_context = logsCommandEntry;
+    logs_command.context = this;
+    result = esp_console_cmd_register(&logs_command);
+    if (result != ESP_OK) {
+        return result;
+    }
+
 #if LED_CONTROLLER_AT24C08_ENABLED
     esp_console_cmd_t settings_command{};
     settings_command.command = "settings";
@@ -211,10 +225,11 @@ esp_err_t ServiceConsole::start() noexcept {
         return ESP_ERR_INVALID_STATE;
     }
 
+    DebugLog::instance().setUartEnabled(false);
     const esp_err_t result = esp_console_start_repl(repl_);
     if (result == ESP_OK) {
         started_ = true;
-        std::printf("Konsola serwisowa gotowa. Wpisz: wifi help, mqtt help");
+        std::printf("Konsola serwisowa gotowa. Wpisz: wifi help, mqtt help, logs status");
 #if LED_CONTROLLER_AT24C08_ENABLED
         std::printf(", settings help");
 #endif
@@ -225,18 +240,51 @@ esp_err_t ServiceConsole::start() noexcept {
         std::printf(", temp help");
 #endif
         std::printf("\n");
+        std::printf("Logi ESP_LOG na UART: OFF (logs on/off); WWW/MQTT bez zmian\n");
+    } else {
+        DebugLog::instance().setUartEnabled(true);
     }
     return result;
 }
 
+int ServiceConsole::logsCommandEntry(void* const, const int argc, char** const argv) noexcept {
+    auto& logger = DebugLog::instance();
+    if (argc == 2) {
+        if (std::strcmp(argv[1], "on") == 0) {
+            logger.setUartEnabled(true);
+        } else if (std::strcmp(argv[1], "off") == 0) {
+            logger.setUartEnabled(false);
+        } else if (std::strcmp(argv[1], "status") != 0) {
+            std::printf("Uzycie: logs <status|on|off>\n");
+            return 1;
+        }
+        std::printf("Logi ESP_LOG na UART: %s\n", logger.uartEnabled() ? "ON" : "OFF");
+        return 0;
+    }
+    if (argc == 1) {
+        std::printf("Logi ESP_LOG na UART: %s\n", logger.uartEnabled() ? "ON" : "OFF");
+        return 0;
+    }
+    std::printf("Uzycie: logs <status|on|off>\n");
+    return 1;
+}
+
 int ServiceConsole::commandEntry(void* const context, const int argc, char** const argv) noexcept {
     auto* const console = static_cast<ServiceConsole*>(context);
+#if LED_CONTROLLER_AT24C08_ENABLED
+    if (console->mustChangeWebPassword())
+        return printPasswordChangeRequired();
+#endif
     return console->handleCommand(argc, argv);
 }
 
 int ServiceConsole::mqttCommandEntry(void* const context, const int argc,
                                      char** const argv) noexcept {
     auto* const console = static_cast<ServiceConsole*>(context);
+#if LED_CONTROLLER_AT24C08_ENABLED
+    if (console->mustChangeWebPassword())
+        return printPasswordChangeRequired();
+#endif
     return console->handleMqttCommand(argc, argv);
 }
 
@@ -244,7 +292,23 @@ int ServiceConsole::mqttCommandEntry(void* const context, const int argc,
 int ServiceConsole::settingsCommandEntry(void* const context, const int argc,
                                          char** const argv) noexcept {
     auto* const console = static_cast<ServiceConsole*>(context);
+    if (console->mustChangeWebPassword() &&
+        !(argc == 2 &&
+          (std::strcmp(argv[1], "web-password") == 0 || std::strcmp(argv[1], "status") == 0 ||
+           std::strcmp(argv[1], "help") == 0)) &&
+        !(argc == 3 && std::strcmp(argv[1], "clear") == 0))
+        return printPasswordChangeRequired();
     return console->handleSettingsCommand(argc, argv);
+}
+
+bool ServiceConsole::mustChangeWebPassword() const noexcept {
+    const auto state = settings_service_.status();
+    return state.storage_ready && !state.web_password_set;
+}
+
+int ServiceConsole::printPasswordChangeRequired() noexcept {
+    std::printf("Najpierw ustaw haslo administratora: settings web-password\n");
+    return 1;
 }
 #endif
 
@@ -252,6 +316,10 @@ int ServiceConsole::settingsCommandEntry(void* const context, const int argc,
 int ServiceConsole::ina228CommandEntry(void* const context, const int argc,
                                        char** const argv) noexcept {
     auto* const console = static_cast<ServiceConsole*>(context);
+#if LED_CONTROLLER_AT24C08_ENABLED
+    if (console->mustChangeWebPassword())
+        return printPasswordChangeRequired();
+#endif
     return console->handleIna228Command(argc, argv);
 }
 #endif
@@ -260,6 +328,10 @@ int ServiceConsole::ina228CommandEntry(void* const context, const int argc,
 int ServiceConsole::temperatureCommandEntry(void* const context, const int argc,
                                             char** const argv) noexcept {
     auto* const console = static_cast<ServiceConsole*>(context);
+#if LED_CONTROLLER_AT24C08_ENABLED
+    if (console->mustChangeWebPassword())
+        return printPasswordChangeRequired();
+#endif
     return console->handleTemperatureCommand(argc, argv);
 }
 #endif
@@ -468,6 +540,32 @@ int ServiceConsole::handleSettingsCommand(const int argc, char** const argv) noe
     if ((argc == 2) && (std::strcmp(argv[1], "status") == 0)) {
         printSettingsStatus();
         return 0;
+    }
+    if (std::strcmp(argv[1], "web-password") == 0) {
+        if (argc != 2) {
+            std::printf("Uzycie: settings web-password (haslo podaj w ukrytym monicie)\n");
+            return 1;
+        }
+        std::array<char, 65> password{};
+        if (readSecret(password.data(), password.size(), "Nowe haslo WWW (12-64 znaki ASCII): ") !=
+            0)
+            return 1;
+        std::array<char, 65> repeated{};
+        if (readSecret(repeated.data(), repeated.size(), "Powtorz nowe haslo WWW: ") != 0) {
+            secureZero(password.data(), password.size());
+            return 1;
+        }
+        if (std::strcmp(password.data(), repeated.data()) != 0) {
+            secureZero(password.data(), password.size());
+            secureZero(repeated.data(), repeated.size());
+            std::printf("BLAD: hasla roznia sie\n");
+            return 1;
+        }
+        const esp_err_t result = settings_service_.setWebPassword(password.data());
+        secureZero(password.data(), password.size());
+        secureZero(repeated.data(), repeated.size());
+        printResult("nowe haslo WWW przyjete; potwierdz zapis przez settings status", result);
+        return (result == ESP_OK) ? 0 : 1;
     }
     if ((argc == 2) && (std::strcmp(argv[1], "save") == 0)) {
         settings_service_.requestSave();
@@ -830,6 +928,7 @@ void ServiceConsole::printSettingsStatus() const noexcept {
     std::printf("Przypisane role DS18B20: %u/2\n",
                 static_cast<unsigned>(status.temperature_assignments));
     std::printf("Jasnosc i stany LED: nie sa zapisywane\n");
+    std::printf("Haslo WWW: %s\n", status.web_password_set ? "ustawione" : "wymaga zmiany z admin");
     std::printf("Ostatni wynik: %s\n", esp_err_to_name(status.last_error));
 }
 #endif
@@ -980,6 +1079,7 @@ void ServiceConsole::printSettingsHelp() noexcept {
     std::printf("  settings reload\n");
     std::printf("  settings clear CONFIRM\n");
     std::printf("  settings ina-cal <-100000..100000>\n");
+    std::printf("  settings web-password\n");
     std::printf("Po poprawnym wifi apply lub mqtt apply zapis nastepuje po 5 s.\n");
     std::printf("Jasnosc i stany kanalow LED nigdy nie trafiaja do EEPROM-u.\n");
 }

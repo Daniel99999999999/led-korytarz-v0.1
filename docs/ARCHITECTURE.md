@@ -71,3 +71,26 @@ z MQTT/HTTPS OTA. Obie ścieżki używają nieaktywnej partycji i dotychczasowej
 startu/rollback. AP używa RAM i nie zmienia ustawień sieci w AT24C08N.
 Strona przyjmuje surowy binarny POST, weryfikuje adres AP, token i deskryptor przed
 zapisem; odrzuca obcy projekt i tę samą wersję, obsługuje przerwanie i limit czasu.
+
+## Panel diagnostyczny HTTPS v0.10.0
+
+`WebDiagnosticsService` uzywa portu 443 i mDNS `sterownik-led.local`. Nie przejmuje
+portu 80 uzywanego przez lokalne OTA w hotspotcie serwisowym. Certyfikat i klucz
+P-256 powstaja na ESP32 przy pierwszym starcie i sa zachowywane w NVS; UART pokazuje
+odcisk SHA-256 certyfikatu. Panel czyta snapshot kolejki MQTT i osobny, ograniczony
+bufor ESP_LOG. Przyciski, PWM i stan kontrolera nie sa modyfikowane przez WWW.
+
+Pierwsze uwierzytelnienie `admin/admin` daje dostep tylko do zmiany hasla. Solony
+weryfikator PBKDF2-SHA256 trafia do istniejacego rekordu AES-GCM w AT24C08N; nowy
+login staje sie aktywny dopiero po potwierdzonym zapisie. Bez dostepnego EEPROM-u
+panel odmawia dostepu, a lokalne sterowanie nie jest blokowane. Zwykle komendy
+UART sa wstrzymane do zmiany hasla, gdy EEPROM jest gotowy. Szczegoly i testy:
+[WEB_DIAGNOSTICS.md](WEB_DIAGNOSTICS.md).
+
+## Konsola UART v0.10.1
+
+`DebugLog` przepuszcza ESP_LOG na UART podczas startu. Po uruchomieniu REPL
+wycisza tylko ten strumien; odpowiedzi `printf` konsoli, logi WWW i opcjonalny
+bufor diagnostyki MQTT pozostaja niezalezne. Komendy `logs status`, `logs on`
+i `logs off` pozwalaja czasowo przywrocic logi na UART. Ustawienie nie jest
+zapisywane i po resecie wraca do trybu startowego.

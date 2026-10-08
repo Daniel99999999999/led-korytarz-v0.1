@@ -29,6 +29,7 @@ enum class Field : std::uint8_t {
     ina_current_correction_ppm = 32,
     temperature_radiator_rom = 33,
     temperature_enclosure_rom = 34,
+    web_password_verifier = 35,
 };
 
 class Writer final {
@@ -120,6 +121,13 @@ template <std::size_t Size>
 }
 
 [[nodiscard]] bool validate(const Data& settings) noexcept {
+    if (settings.web.configured &&
+        (std::all_of(settings.web.salt.begin(), settings.web.salt.end(),
+                     [](std::uint8_t value) { return value == 0U; }) ||
+         std::all_of(settings.web.verifier.begin(), settings.web.verifier.end(),
+                     [](std::uint8_t value) { return value == 0U; }))) {
+        return false;
+    }
     if ((settings.ina_current_correction_ppm < kMinimumInaCurrentCorrectionPpm) ||
         (settings.ina_current_correction_ppm > kMaximumInaCurrentCorrectionPpm)) {
         return false;
@@ -287,6 +295,13 @@ CodecResult encode(const Data& settings, std::uint8_t* const output,
         written = writer.appendUint64(Field::temperature_enclosure_rom,
                                       settings.temperature_assignments.rom_ids[1]);
     }
+    if (written && settings.web.configured) {
+        std::array<std::uint8_t, 48> credential{};
+        std::copy(settings.web.salt.begin(), settings.web.salt.end(), credential.begin());
+        std::copy(settings.web.verifier.begin(), settings.web.verifier.end(),
+                  credential.begin() + static_cast<std::ptrdiff_t>(settings.web.salt.size()));
+        written = writer.append(Field::web_password_verifier, credential.data(), credential.size());
+    }
     if (!written) {
         std::fill_n(output, output_capacity, static_cast<std::uint8_t>(0));
         return CodecResult::buffer_too_small;
@@ -404,6 +419,15 @@ CodecResult decode(const std::uint8_t* const payload, const std::size_t payload_
             accepted = length == 8U;
             if (accepted) {
                 settings.temperature_assignments.rom_ids[1] = readUint64(value);
+            }
+            break;
+        case Field::web_password_verifier:
+            accepted = length == 48U;
+            if (accepted) {
+                std::copy_n(value, settings.web.salt.size(), settings.web.salt.begin());
+                std::copy_n(value + settings.web.salt.size(), settings.web.verifier.size(),
+                            settings.web.verifier.begin());
+                settings.web.configured = true;
             }
             break;
         default:

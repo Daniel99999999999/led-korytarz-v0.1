@@ -13,6 +13,9 @@
 #include "SettingsService.hpp"
 #endif
 #include "WifiService.hpp"
+#if LED_CONTROLLER_AT24C08_ENABLED
+#include "WebDiagnosticsService.hpp"
+#endif
 #include "esp_app_desc.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -35,6 +38,8 @@ extern "C" void app_main() {
 #if LED_CONTROLLER_AT24C08_ENABLED
     static SettingsService settings_service(wifi_service, mqtt_service);
     static ServiceConsole service_console(wifi_service, mqtt_service, controller, settings_service);
+    static WebDiagnosticsService web_diagnostics(wifi_service, mqtt_service, ota_service,
+                                                 controller, settings_service);
 #else
     static ServiceConsole service_console(wifi_service, mqtt_service, controller);
 #endif
@@ -106,7 +111,6 @@ extern "C" void app_main() {
                      esp_err_to_name(wifi_start_result));
         }
     }
-
 #if LED_CONTROLLER_AT24C08_ENABLED
     const esp_err_t settings_prepare_result = settings_service.initialize();
     if (settings_prepare_result != ESP_OK) {
@@ -126,12 +130,24 @@ extern "C" void app_main() {
     }
 
     esp_err_t console_result = service_console.initialize();
-    if (console_result == ESP_OK) {
+#if LED_CONTROLLER_AT24C08_ENABLED
+    if (wifi_prepare_result == ESP_OK && settings_prepare_result == ESP_OK) {
+        const esp_err_t web_prepare_result = web_diagnostics.initialize();
+        if (web_prepare_result == ESP_OK) {
+            const esp_err_t web_start_result = web_diagnostics.start();
+            if (web_start_result != ESP_OK)
+                ESP_LOGW(kTag, "Panel WWW niedostepny: %s", esp_err_to_name(web_start_result));
+        } else {
+            ESP_LOGW(kTag, "Panel HTTPS niedostepny (NVS/tozsamosc): %s",
+                     esp_err_to_name(web_prepare_result));
+        }
+    }
+#endif
+
+    if (console_result == ESP_OK)
         console_result = service_console.start();
-    }
-    if (console_result != ESP_OK) {
+    if (console_result != ESP_OK)
         ESP_LOGE(kTag, "Konsola serwisowa niedostepna: %s", esp_err_to_name(console_result));
-    }
 
     // app_main moze sie zakonczyc. Sterowanie przejmuje zadanie FreeRTOS.
 }

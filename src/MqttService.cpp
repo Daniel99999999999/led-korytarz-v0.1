@@ -427,6 +427,9 @@ bool MqttService::tryGetStatus(Status& output) const noexcept {
     output = copy;
     return true;
 }
+bool MqttService::tryGetSnapshot(Snapshot& output) const noexcept {
+    return snapshot_queue_ != nullptr && xQueuePeek(snapshot_queue_, &output, 0) == pdPASS;
+}
 
 #if LED_CONTROLLER_AT24C08_ENABLED
 esp_err_t

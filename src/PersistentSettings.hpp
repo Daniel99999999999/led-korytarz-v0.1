@@ -43,9 +43,16 @@ struct MqttConfig final {
     bool configured{false};
 };
 
+struct WebCredential final {
+    std::array<std::uint8_t, 16> salt{};
+    std::array<std::uint8_t, 32> verifier{};
+    bool configured{false};
+};
+
 struct Data final {
     WifiConfig wifi{};
     MqttConfig mqtt{};
+    WebCredential web{};
     TemperatureAssignments temperature_assignments{};
     std::int32_t ina_current_correction_ppm{0};
 };

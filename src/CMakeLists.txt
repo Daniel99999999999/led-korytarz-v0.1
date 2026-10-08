@@ -65,11 +65,17 @@ if(CONFIG_LED_CONTROLLER_AT24C08)
         "PersistentSettings.cpp"
         "DeviceKeyProvider.cpp"
         "SettingsService.cpp"
+        "WebPassword.cpp"
+        "WebDiagnosticsService.cpp"
+        "DeviceTlsIdentity.cpp"
     )
     list(APPEND component_private_requires
         esp_timer
         efuse
         mbedtls
+        esp_https_server
+        espressif__cjson
+        espressif__mdns
     )
 endif()
 

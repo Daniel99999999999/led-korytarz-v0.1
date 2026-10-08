@@ -41,6 +41,8 @@ class SettingsService final {
         bool record_applied{false};
         bool save_pending{false};
         bool save_in_progress{false};
+        bool storage_ready{false};
+        bool web_password_set{false};
     };
 
     SettingsService(WifiService& wifi_service, MqttService& mqtt_service) noexcept;
@@ -59,6 +61,8 @@ class SettingsService final {
     void requestReload() noexcept;
     esp_err_t requestClear() noexcept;
     esp_err_t setInaCurrentCorrectionPpm(std::int32_t correction_ppm) noexcept;
+    esp_err_t setWebPassword(const char* password) noexcept;
+    esp_err_t readWebCredential(persistent_settings::WebCredential& output) const noexcept;
 
     [[nodiscard]] bool isInitialized() const noexcept;
     [[nodiscard]] bool isBusAttached() const noexcept;
@@ -98,6 +102,9 @@ class SettingsService final {
     std::atomic<bool> bus_recovery_requested_{false};
     TemperatureAssignments temperature_assignments_cache_{};
     persistent_settings::Data loaded_settings_{};
+    persistent_settings::WebCredential web_credential_{};
+    persistent_settings::WebCredential web_saving_credential_{};
+    persistent_settings::WebCredential web_active_credential_{};
     Status status_{};
     TickType_t next_storage_action_at_{0};
     TickType_t next_apply_attempt_at_{0};

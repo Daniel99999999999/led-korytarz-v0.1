@@ -21,6 +21,7 @@
 #include "SecureSettingsRecord.hpp"
 #include "StatusIndicator.hpp"
 #include "TemperatureModel.hpp"
+#include "WebLogBuffer.hpp"
 
 #include <array>
 #include <cstdint>
@@ -1010,6 +1011,9 @@ void testPersistentSettingsRoundTrip() noexcept {
     source.ina_current_correction_ppm = -12'500;
     source.temperature_assignments.rom_ids[0] = makeDs18b20Rom(0x20U);
     source.temperature_assignments.rom_ids[1] = makeDs18b20Rom(0x40U);
+    source.web.configured = true;
+    source.web.salt[0] = 0x31;
+    source.web.verifier[0] = 0xA7;
 
     SecureSettingsRecord::Payload payload{};
     std::size_t payload_size = 0;
@@ -1036,6 +1040,9 @@ void testPersistentSettingsRoundTrip() noexcept {
     EXPECT_TRUE(decoded.mqtt.discovery_prefix == source.mqtt.discovery_prefix);
     EXPECT_EQ(source.ina_current_correction_ppm, decoded.ina_current_correction_ppm);
     EXPECT_TRUE(source.temperature_assignments.rom_ids == decoded.temperature_assignments.rom_ids);
+    EXPECT_TRUE(decoded.web.configured);
+    EXPECT_TRUE(decoded.web.salt == source.web.salt);
+    EXPECT_TRUE(decoded.web.verifier == source.web.verifier);
 }
 
 void testPersistentSettingsEmptyRecordUsesDefaults() noexcept {
@@ -1051,6 +1058,7 @@ void testPersistentSettingsEmptyRecordUsesDefaults() noexcept {
               persistent_settings::decode(payload.data(), payload_size, decoded));
     EXPECT_TRUE(!decoded.wifi.configured);
     EXPECT_TRUE(!decoded.mqtt.configured);
+    EXPECT_TRUE(!decoded.web.configured);
     EXPECT_EQ(0, decoded.ina_current_correction_ppm);
     EXPECT_EQ(0U, decoded.temperature_assignments.rom_ids[0]);
     EXPECT_EQ(0U, decoded.temperature_assignments.rom_ids[1]);
@@ -1058,6 +1066,20 @@ void testPersistentSettingsEmptyRecordUsesDefaults() noexcept {
                             persistent_settings::kDefaultTopicPrefix) == 0);
     EXPECT_TRUE(std::strcmp(decoded.mqtt.discovery_prefix.data(),
                             persistent_settings::kDefaultDiscoveryPrefix) == 0);
+}
+
+void testPersistentSettingsRejectsEmptyWebVerifier() noexcept {
+    persistent_settings::Data settings{};
+    SecureSettingsRecord::Payload payload{};
+    std::size_t size = 0;
+    settings.web.configured = true;
+    settings.web.salt[0] = 1;
+    EXPECT_EQ(persistent_settings::CodecResult::invalid_data,
+              persistent_settings::encode(settings, payload.data(), payload.size(), size));
+    settings.web.verifier[0] = 1;
+    settings.web.salt[0] = 0;
+    EXPECT_EQ(persistent_settings::CodecResult::invalid_data,
+              persistent_settings::encode(settings, payload.data(), payload.size(), size));
 }
 
 void testPersistentSettingsRejectsInvalidTemperatureAssignments() noexcept {
@@ -1351,6 +1373,22 @@ void testDebugSession() noexcept {
     buffer.setEnabled(true, 703);
     EXPECT_TRUE(!buffer.pop(message, 704));
 }
+void testWebLogRing() noexcept {
+    WebLogBuffer buffer;
+    WebLogBuffer::Entry entry{};
+    bool gap = false;
+    EXPECT_TRUE(!buffer.nextAfter(0, entry, gap));
+    for (std::size_t index = 0; index < WebLogBuffer::kCapacity + 3U; ++index)
+        buffer.push("line");
+    EXPECT_TRUE(buffer.nextAfter(1, entry, gap));
+    EXPECT_TRUE(gap);
+    EXPECT_EQ(4U, entry.sequence);
+    EXPECT_TRUE(std::strcmp(entry.text.data(), "line") == 0);
+    EXPECT_TRUE(buffer.nextAfter(entry.sequence, entry, gap));
+    EXPECT_EQ(5U, entry.sequence);
+    EXPECT_TRUE(!gap);
+    EXPECT_TRUE(!buffer.nextAfter(buffer.latest(), entry, gap));
+}
 void testDebugOverflowAndRenewal() noexcept {
     DebugBuffer buffer;
     buffer.setEnabled(true, 0xFFFFFF00U);
@@ -1501,8 +1539,8 @@ void testLocalOtaImageHeader() noexcept {
     image[33] = 0x54;
     image[34] = static_cast<char>(0xCD);
     image[35] = static_cast<char>(0xAB);
-    std::strcpy(image.data() + 48, "0.9.1");
-    std::strcpy(image.data() + 80, "led_controller");
+    std::memcpy(image.data() + 48, "0.9.1", sizeof("0.9.1"));
+    std::memcpy(image.data() + 80, "led_controller", sizeof("led_controller"));
     EXPECT_TRUE(
         local_ota_validation::header(image.data(), image.size(), "led_controller", "0.9.0"));
     EXPECT_TRUE(!local_ota_validation::header(image.data(), 287, "led_controller", "0.9.0"));
@@ -1538,6 +1576,7 @@ int main() {
     testLocalOtaImageHeader();
     testLocalOtaButtonGesture();
     testDebugSession();
+    testWebLogRing();
     testDebugOverflowAndRenewal();
     testDebugDiscovery();
     testBacklightNightAndMotion();
@@ -1593,6 +1632,7 @@ int main() {
     testSecureSettingsSequenceOrdering();
     testPersistentSettingsRoundTrip();
     testPersistentSettingsEmptyRecordUsesDefaults();
+    testPersistentSettingsRejectsEmptyWebVerifier();
     testPersistentSettingsRejectsInvalidTemperatureAssignments();
     testPersistentSettingsRejectsMalformedAndOversizedData();
 
@@ -1601,6 +1641,6 @@ int main() {
         return 1;
     }
 
-    std::printf("Host tests passed: 62\n");
+    std::printf("Host tests passed\n");
     return 0;
 }

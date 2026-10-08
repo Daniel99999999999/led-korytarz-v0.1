@@ -294,6 +294,17 @@ Ta sama wersja dodaje HTTPS OTA w osobnym zadaniu oraz tabelę `partitions_ota_4
 
 Ta wersja dodaje też profil PlatformIO `esp32doit-devkit-v1-ota` oraz uploader MQTT/HTTPS. Profil używa dokładnie bazowego `sdkconfig.esp32doit-devkit-v1`, a lokalne dane brokera i serwera są wyłącznie w ignorowanym `secrets.ota.json`. Uploader opcjonalnie publikuje plik lokalnie, sprawdza zdalny rozmiar i SHA-256, wysyła URL z QoS 1 i czeka na uruchomienie oraz zatwierdzenie nowej wersji. Oba profile zbudowano bez ostrzeżeń; deskryptory potwierdzają `led_controller`/`0.7.2`, testy hostowe mają 45/45 PASS, a 120 plików UTF-8 bez BOM. Rzeczywisty HIL odłączania klientów oraz transfer HTTPS OTA nadal mają status `NOT RUN`.
 
+## 2026-10-08: v0.10.0 (kod, bez HIL)
+
+Nowy panel diagnostyczny jest dostepny tylko w buildzie z AT24C08N. Serwer HTTPS
+na porcie 443 czyta statusy i osobny bufor logow, ma wylacznie skany Wi-Fi/1-Wire
+oraz obowiazkowa zmiane poczatkowego hasla admin/admin. Solony weryfikator jest
+w zaszyfrowanym rekordzie EEPROM; certyfikat P-256 i klucz TLS powstaja lokalnie
+i sa przechowywane w NVS. Lokalny hotspot OTA zachowuje wlasny port 80.
+Szczegoly i testy HIL: [docs/WEB_DIAGNOSTICS.md](docs/WEB_DIAGNOSTICS.md).
+Kompilacja i testy hostowe przechodza; nowy obraz nie zostal jeszcze wgrany ani
+przetestowany na ESP32. Ostatni log sprzetowy wskazywal firmware v0.8.2.
+
 ## Definition of done
 
 - build kończy się powodzeniem bez nowych ostrzeżeń;
@@ -301,3 +312,17 @@ Ta wersja dodaje też profil PlatformIO `esp32doit-devkit-v1-ota` oraz uploader 
 - dokumentacja jest zgodna z kodem;
 - testy sprzętowe są wyraźnie oddzielone od kompilacji;
 - repozytorium nie zawiera sekretów ani artefaktów builda.
+
+## 2026-10-08: v0.10.1 (kod, bez HIL)
+
+Po uruchomieniu REPL logi ESP_LOG przestaja byc wypisywane asynchronicznie na
+UART. `logs status/on/off` steruje tylko emisja UART; odpowiedzi konsoli i
+bufory logow WWW/MQTT pozostaja aktywne. Odcisk certyfikatu HTTPS nadal jest
+drukowany w fazie startowej, przed uruchomieniem promptu.
+Zmiana hasla w lokalnym pliku `secrets.mosquitto.passwd` nie odswiezyla juz
+dzialajacego procesu Mosquitto. Po restarcie lokalnego brokera na adresie
+192.168.1.130:1883 polaczenie TCP z ESP32 utrzymalo sie co najmniej 12 s.
+Nie odczytano jeszcze `mqtt status` z ESP po restarcie brokera. Bez wgrania
+nowego obrazu nie deklarowac HIL konsoli ani HTTPS v0.10.1.
+`scripts/check.sh` oraz build profilu OTA zakonczone powodzeniem; testy hostowe
+CTest 2/2 PASS, bez nowych ostrzezen kompilatora.

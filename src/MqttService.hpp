@@ -115,6 +115,7 @@ class MqttService final {
 
     [[nodiscard]] Status status() const noexcept;
     [[nodiscard]] bool tryGetStatus(Status& output) const noexcept;
+    [[nodiscard]] bool tryGetSnapshot(Snapshot& output) const noexcept;
 #if LED_CONTROLLER_AT24C08_ENABLED
     esp_err_t exportPersistentConfig(persistent_settings::MqttConfig& output) const noexcept;
     esp_err_t restorePersistentConfig(const persistent_settings::MqttConfig& input) noexcept;

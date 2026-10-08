@@ -4,6 +4,7 @@
 
 #include "MqttService.hpp"
 #include "SettingsService.hpp"
+#include "WebPassword.hpp"
 #include "WifiService.hpp"
 #if LED_CONTROLLER_DS18B20_ENABLED
 #include "Ds18b20Service.hpp"
@@ -129,6 +130,7 @@ esp_err_t SettingsService::attachBus(const i2c_master_bus_handle_t bus_handle,
             status_.record_found = false;
             status_.record_applied = false;
             status_.save_in_progress = false;
+            status_.storage_ready = false;
         }
     }
     return ESP_OK;
@@ -151,10 +153,15 @@ esp_err_t SettingsService::detachBus() noexcept {
     {
         MutexGuard lock(mutex_);
         if (lock.locked()) {
+            secureZero(&web_credential_, sizeof(web_credential_));
+            secureZero(&web_saving_credential_, sizeof(web_saving_credential_));
+            secureZero(&web_active_credential_, sizeof(web_active_credential_));
             status_.bus_attached = false;
             status_.eeprom_present = false;
             status_.record_applied = false;
             status_.save_in_progress = false;
+            status_.storage_ready = false;
+            status_.web_password_set = false;
             if (result != ESP_OK) {
                 status_.last_error = result;
             }
@@ -276,6 +283,7 @@ esp_err_t SettingsService::requestClear() noexcept {
     {
         MutexGuard lock(mutex_);
         if (lock.locked()) {
+            web_credential_ = {};
             status_.ina_current_correction_ppm = 0;
             status_.temperature_assignments = 0;
             status_.record_applied = false;
@@ -298,6 +306,60 @@ esp_err_t SettingsService::setInaCurrentCorrectionPpm(const std::int32_t correct
         }
     }
     notifyConfigurationChanged();
+    return ESP_OK;
+}
+
+esp_err_t SettingsService::setWebPassword(const char* password) noexcept {
+    persistent_settings::WebCredential candidate{};
+    esp_err_t result = web_password::create(password, candidate);
+    if (result != ESP_OK)
+        return result;
+    persistent_settings::Data preview{};
+    SecureSettingsRecord::Payload encoded{};
+    std::size_t encoded_size = 0;
+    result = wifi_service_.exportPersistentConfig(preview.wifi);
+    if (result == ESP_OK)
+        result = mqtt_service_.exportPersistentConfig(preview.mqtt);
+    if (result == ESP_OK) {
+        preview.ina_current_correction_ppm = inaCurrentCorrectionPpm();
+#if LED_CONTROLLER_DS18B20_ENABLED
+        if (temperature_service_ != nullptr)
+            preview.temperature_assignments = temperature_service_->assignments();
+#endif
+        preview.web = candidate;
+        const auto codec =
+            persistent_settings::encode(preview, encoded.data(), encoded.size(), encoded_size);
+        if (codec != persistent_settings::CodecResult::ok)
+            result = codec == persistent_settings::CodecResult::buffer_too_small
+                         ? ESP_ERR_INVALID_SIZE
+                         : ESP_ERR_INVALID_ARG;
+    }
+    secureZero(&preview, sizeof(preview));
+    secureZero(encoded.data(), encoded.size());
+    if (result != ESP_OK) {
+        secureZero(&candidate, sizeof(candidate));
+        return result;
+    }
+    {
+        MutexGuard lock(mutex_);
+        if (!lock.locked() || !status_.storage_ready || !status_.eeprom_present ||
+            !status_.key_ready) {
+            secureZero(&candidate, sizeof(candidate));
+            return ESP_ERR_INVALID_STATE;
+        }
+        web_credential_ = candidate;
+    }
+    secureZero(&candidate, sizeof(candidate));
+    requestSave();
+    return ESP_OK;
+}
+
+esp_err_t
+SettingsService::readWebCredential(persistent_settings::WebCredential& output) const noexcept {
+    MutexGuard lock(mutex_);
+    if (!lock.locked() || !status_.storage_ready || !status_.eeprom_present || !status_.key_ready)
+        return ESP_ERR_INVALID_STATE;
+    output = web_active_credential_;
     return ESP_OK;
 }
 
@@ -355,6 +417,11 @@ void SettingsService::loadRecord(const TickType_t now) noexcept {
         secureZero(plaintext.data(), plaintext.size());
         storage_loaded_ = (result == ESP_ERR_INVALID_CRC) || (result == ESP_ERR_INVALID_VERSION);
         markStorageError(result);
+        {
+            MutexGuard lock(mutex_);
+            if (lock.locked())
+                status_.storage_ready = false;
+        }
         if (!storage_loaded_) {
             eeprom_present_ = false;
             store_.resetState();
@@ -377,6 +444,9 @@ void SettingsService::loadRecord(const TickType_t now) noexcept {
         if (decode_result != persistent_settings::CodecResult::ok) {
             secureZero(plaintext.data(), plaintext.size());
             markStorageError(ESP_ERR_INVALID_RESPONSE);
+            MutexGuard lock(mutex_);
+            if (lock.locked())
+                status_.storage_ready = false;
             ESP_LOGE(kTag, "Payload ustawien odrzucony: %s",
                      persistent_settings::resultName(decode_result));
             return;
@@ -386,6 +456,25 @@ void SettingsService::loadRecord(const TickType_t now) noexcept {
 
     const bool unsaved_runtime_changes =
         requested_revision_.load(std::memory_order_acquire) != saved_revision_;
+    if (!found && !unsaved_runtime_changes) {
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            web_credential_ = {};
+            web_active_credential_ = {};
+            status_.web_password_set = false;
+        }
+    }
+
+    if (found) {
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            if (!unsaved_runtime_changes || !web_credential_.configured)
+                web_credential_ = decoded.web;
+            web_active_credential_ = decoded.web;
+            status_.web_password_set = decoded.web.configured;
+        }
+    }
+
     if (found && !unsaved_runtime_changes) {
         secureZero(&loaded_settings_, sizeof(loaded_settings_));
         loaded_settings_ = decoded;
@@ -412,6 +501,7 @@ void SettingsService::loadRecord(const TickType_t now) noexcept {
         MutexGuard lock(mutex_);
         if (lock.locked()) {
             status_.record_found = found;
+            status_.storage_ready = true;
             status_.record_applied = false;
             status_.active_sequence = store_.activeSequence();
             status_.payload_size = plaintext_size;
@@ -504,6 +594,17 @@ void SettingsService::beginSave(const TickType_t now) noexcept {
     }
 #endif
     settings.temperature_assignments = temperature_assignments_cache_;
+    bool credential_copied = false;
+    {
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            settings.web = web_credential_;
+            web_saving_credential_ = web_credential_;
+            credential_copied = true;
+        }
+    }
+    if (!credential_copied && result == ESP_OK)
+        result = ESP_FAIL;
     if (result != ESP_OK) {
         secureZero(&settings, sizeof(settings));
         markStorageError(result);
@@ -566,6 +667,8 @@ void SettingsService::finishSave(const esp_err_t result, const TickType_t now) n
         {
             MutexGuard lock(mutex_);
             if (lock.locked()) {
+                web_active_credential_ = web_saving_credential_;
+                status_.web_password_set = web_active_credential_.configured;
                 status_.active_sequence = store_.activeSequence();
                 status_.record_found = true;
                 status_.record_applied = true;
@@ -599,6 +702,7 @@ void SettingsService::finishSave(const esp_err_t result, const TickType_t now) n
         MutexGuard lock(mutex_);
         if (lock.locked()) {
             status_.eeprom_present = false;
+            status_.storage_ready = false;
         }
     }
     updateSavePendingStatus();

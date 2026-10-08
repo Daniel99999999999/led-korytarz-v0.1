@@ -946,3 +946,33 @@ Test na ESP32 pozostaje do wykonania; nie wgrywac firmware automatycznie.
 Publiczne repozytorium wydan nie ma jeszcze Release, a na tym komputerze nie ma
 `secrets.ota.json`. Kompilacja profilu OTA przeszla; obraz `led_controller/0.9.1`
 ma 1 277 440 B. Nie wykonano publikacji ani aktualizacji ESP32.
+
+## 2026-10-08 - lokalny panel diagnostyczny WWW
+
+- [x] Odczytac kontrakty sprzetowe i architekture; uruchomic bazowe `check.sh`.
+- [x] Naprawic niezalezny od funkcji blad kompilacji hostowej MSVC (`strcpy`).
+- [x] Dodac osobny, ograniczony bufor logow WWW bez oprozniania bufora MQTT.
+- [x] Dodac panel HTTPS na porcie 443: statusy i tylko jawnie dozwolone skany.
+- [x] Dodac konto admin; admin/admin w trybie pierwszego logowania wymusza zmiane hasla.
+- [x] Zapisac solony weryfikator hasla w zaszyfrowanym AT24C08N, zachowac stare rekordy.
+- [x] Wygenerowac certyfikat urzadzenia i pokazac odcisk na UART; bez klucza w repo.
+- [x] Zapewnic dostep przez IP i `sterownik-led.local`, bez wymagania LCD.
+- [x] Zachowac osobny hotspot OTA HTTP na porcie 80, bez kolizji z HTTPS.
+- [x] Rozszerzyc testy hostowe, dokumentacje i uruchomic `check.sh`.
+- [ ] HIL: sprawdzic logowanie, odswiezanie, skany, brak sekretow oraz lokalne OTA.
+
+Panel nie zapisuje hasel Wi-Fi/MQTT ani nie steruje bezposrednio LEDC. Certyfikat
+i klucz TLS pozostaja w NVS, haslo panelu jako solony weryfikator w AT24C08N.
+Brak sieci, NVS, MQTT, EEPROM i LCD nie zatrzymuje lokalnego sterowania.
+
+## 2026-10-08 - v0.10.1: spokojna konsola UART
+
+- [x] Oddzielic strumien ESP_LOG na UART od logow WWW/MQTT i odpowiedzi konsoli.
+- [x] Wyciszyc ESP_LOG na UART po starcie REPL; dodac `logs status/on/off`.
+- [x] Dodac test hostowy, ze wyciszenie UART zachowuje logi w obu buforach.
+- [x] Uruchomic `check.sh` i zbudowac profil `esp32doit-devkit-v1-ota`.
+- [ ] HIL: sprawdzic wpisywanie polecen, togglowanie logow i odczyt logow WWW.
+
+Zmiana hasla w lokalnym pliku Mosquitto wymagala restartu procesu brokera.
+Po restarcie polaczenie TCP ESP32 z brokerem pozostalo stabilne przez ponad 12 s;
+status sesji MQTT z UART pozostaje do potwierdzenia.

@@ -28,6 +28,7 @@ class ServiceConsole final {
   private:
     static int commandEntry(void* context, int argc, char** argv) noexcept;
     static int mqttCommandEntry(void* context, int argc, char** argv) noexcept;
+    static int logsCommandEntry(void* context, int argc, char** argv) noexcept;
 #if LED_CONTROLLER_AT24C08_ENABLED
     static int settingsCommandEntry(void* context, int argc, char** argv) noexcept;
 #endif
@@ -41,6 +42,8 @@ class ServiceConsole final {
     int handleMqttCommand(int argc, char** argv) noexcept;
 #if LED_CONTROLLER_AT24C08_ENABLED
     int handleSettingsCommand(int argc, char** argv) noexcept;
+    bool mustChangeWebPassword() const noexcept;
+    static int printPasswordChangeRequired() noexcept;
     void printSettingsStatus() const noexcept;
     static void printSettingsHelp() noexcept;
 #endif
