@@ -26,30 +26,53 @@ który różni się od fabrycznych sdkconfig.defaults. To nie jest kopia NVS ani
 
 Prywatne repozytorium źródeł nie zapewnia publicznego URL do firmware.
 Obecny firmware nie uwierzytelnia pobrań z prywatnych GitHub Releases.
-Utworzono osobne publiczne repozytorium `led-korytarz-firmware` (2026-09-27).
-Nie zawiera jeszcze wydania binarnego. Sam Publish/Push kodu nie uruchamia OTA
-ani nie publikuje firmware.bin.
+Osobne publiczne repozytorium `led-korytarz-firmware` zawiera wyłącznie wydania.
+Zwykły commit i push źródeł nie publikuje obrazu. Publikację uruchamia dopiero
+tag wersji `vMAJOR.MINOR.PATCH` w prywatnym repozytorium źródeł.
 
-Kolejność pierwszego wydania:
-1. Zbudować nową wersję (inną niż wersja działająca na sterowniku).
-2. W publicznym repozytorium utworzyć Release z tagiem wersji i załączyć
-   `.pio/build/esp32doit-devkit-v1-ota/firmware.bin` z tego samego builda.
-3. W lokalnym, ignorowanym secrets.ota.json ustawić firmware_url na adres:
-   `https://github.com/Daniel99999999999/led-korytarz-firmware/releases/download/TAG/firmware.bin`
-   zastępując TAG rzeczywistym tagiem opublikowanego wydania. publish_path: null.
-4. Uzupełnić lokalne dane MQTT (nie przesyłać ich na GitHub).
-5. W PlatformIO wybrać profil esp32doit-devkit-v1-ota i Upload.
+## Jednorazowe przygotowanie publikacji
 
-Uploader sprawdza rozmiar i SHA-256 pliku z HTTPS względem lokalnego obrazu przed
-wysłaniem komendy MQTT. Jeżeli Upload przebuduje obraz, należy opublikować dokładnie
-nowy plik; nie omijać kontroli zgodności. Automatyczna publikacja GitHub Releases
-nie jest jeszcze częścią uploader-a. Prywatnego repozytorium kodu nie zmieniano
-na publiczne; nie opublikowano sekretów ani nie wykonano OTA.
+1. Publiczne repozytorium wydań musi mieć gałąź domyślną (jeżeli jest puste,
+   dodaj tam np. README). Nie kopiuj do niego źródeł ani sekretów.
+2. Utwórz fine-grained personal access token ograniczony **wyłącznie** do
+   `led-korytarz-firmware`, z uprawnieniem `Contents: Read and write` i krótką
+   datą ważności. Token `GITHUB_TOKEN` z repozytorium źródeł nie ma dostępu do
+   drugiego repozytorium.
+3. W prywatnym repozytorium źródeł dodaj token jako Actions secret o nazwie
+   `RELEASE_REPO_TOKEN`. Nie wklejaj tokenu do kodu, logów ani rozmowy.
 
-Stan 2026-10-07: przygotowano lokalnie obraz `led_controller/0.9.1` w
-`.pio/build/esp32doit-devkit-v1-ota/firmware.bin`. Publiczne repozytorium wydań
-nie ma jeszcze Release, a na tym komputerze nie ma `secrets.ota.json`.
-Najpierw opublikować Release `v0.9.1` z tym plikiem, potem ustawić jego URL
-w lokalnej konfiguracji i uruchomić profil OTA. Nie uruchamiać Upload z innym
-artefaktem: uploader porównuje SHA-256 obrazu lokalnego i pobranego przez HTTPS.
+## Wydanie obrazu
+
+1. Ustaw `PROJECT_VER` w `CMakeLists.txt`, wykonaj testy i commit/push źródeł
+   razem z `.github/workflows/publish-firmware.yml`.
+2. Dopiero gdy wersja jest gotowa do testu sprzętowego, wypchnij tag, np.:
+
+   ```powershell
+   git tag -a v0.10.2 -m "Firmware 0.10.2"
+   git push origin v0.10.2
+   ```
+
+3. GitHub Actions uruchomi `check.sh`, zbuduje pełny profil OTA z przypiętego
+   `sdkconfig.esp32doit-devkit-v1`, sprawdzi wersję w obrazie i opublikuje w
+   publicznym Release `firmware.bin`, `release.json` i `SHA256SUMS`.
+   Istniejące wydanie nie jest nadpisywane. Sam Release **nie aktualizuje ESP32**.
+4. Sprawdź wynik Actions i trzy pliki w Release przed rozpoczęciem OTA.
+
+W `secrets.ota.json` ustaw `firmware_url` na
+`https://github.com/Daniel99999999999/led-korytarz-firmware/releases/download/TAG/firmware.bin`,
+zastępując `TAG` rzeczywistym tagiem. Dla obrazu budowanego przez GitHub Actions
+ustaw `"artifact_source": "release"` oraz `"publish_path": null`; zachowaj lokalne
+dane MQTT. Profil PlatformIO `esp32doit-devkit-v1-ota` -> Upload przebuduje lokalny
+obraz, sprawdzi zgodność **wersji** z Release, pobierze manifest i publiczny obraz,
+zweryfikuje jego rozmiar, SHA-256 i deskryptor ESP-IDF, a dopiero potem wyśle
+komendę MQTT. Obrazy z dwóch komputerów mogą mieć różne SHA mimo tych samych źródeł.
+
+Tryb `"artifact_source": "local"` (także domyślny przy braku pola) zachowuje
+poprzednią, ścisłą kontrolę SHA-256 obrazu lokalnego względem obrazu HTTPS.
+Nie stosuj trybu `release` dla niezweryfikowanego wydania. Test uruchomienia,
+rollbacku i sterowania lokalnego na ESP32 jest odrębnym krokiem HIL.
+
+Wersja `0.10.1` z logu użytkownika restartuje się przez przepełnienie stosu main.
+Nie publikuj ani nie wgrywaj jej jako wydania. `0.10.2` wymaga kompilacji,
+publikacji i testu sprzętowego; sam opis powyżej nie oznacza ich wykonania.
 

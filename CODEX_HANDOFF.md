@@ -1,5 +1,14 @@
 # Handoff dla Codex
 
+## Aktualny stan (2026-10-08)
+
+Biezaca wersja zrodel to `0.10.2`. `0.10.1` na urzadzeniu wpadla w bootloop
+(`stack overflow in task main`). Poprawka startu HTTPS, buildy i testy sa
+opisane na koncu tego pliku; HIL `0.10.2` nie zostal jeszcze wykonany.
+Publikacja OTA przez tag jest przygotowana, ale nie uruchomiona i wymaga sekretu
+GitHub `RELEASE_REPO_TOKEN`. Nie wgrywac starego obrazu `0.10.1` ani nie
+zakladac, ze sama kompilacja potwierdzila usuniecie bootloopu.
+
 ## v0.9.1 - obraz do OTA przez GitHub
 
 Wersja `PROJECT_VER` zostala podniesiona do `0.9.1` dla poprawki czerwonego POWER pilota.
@@ -326,3 +335,23 @@ Nie odczytano jeszcze `mqtt status` z ESP po restarcie brokera. Bez wgrania
 nowego obrazu nie deklarowac HIL konsoli ani HTTPS v0.10.1.
 `scripts/check.sh` oraz build profilu OTA zakonczone powodzeniem; testy hostowe
 CTest 2/2 PASS, bez nowych ostrzezen kompilatora.
+
+## 2026-10-08: v0.10.2 (kod, bez HIL)
+
+Log `putty.log` z urzadzenia pokazal powtarzalny `stack overflow in task main`
+po starcie `0.10.1`, przed uruchomieniem panelu HTTPS. Backtrace byl uszkodzony,
+wiec dokladna funkcja MbedTLS nie jest potwierdzona. `0.10.2` startuje konsole
+przed panelem i przenosi przygotowanie certyfikatu/serwera do jednorazowego
+zadania `web_start` ze stosem 16 KiB; blad zadania nie blokuje lokalnego PWM.
+`PROJECT_VER` podniesiono do 0.10.2. `check.sh` przeszedl: 6 testow skryptow,
+2/2 testy hostowe i build bazowy. Pelny profil OTA zbudowal obraz
+`led_controller/0.10.2` (1 378 416 B). HIL startu i panelu pozostaje otwarty;
+nie publikowano Release ani nie wgrywano ESP32.
+
+Publikacja przez tag `vX.Y.Z` jest przygotowana w GitHub Actions; wymaga
+jednorazowego sekretu `RELEASE_REPO_TOKEN` ograniczonego do publicznego repo
+wydan. Workflow buduje i publikuje `firmware.bin`, `release.json` i SHA256SUMS,
+ale nie uruchamia OTA. Lokalny uploader ma jawny tryb `artifact_source=release`
+dla obrazu z CI; stary tryb local nadal wymaga identycznego SHA lokalnego i HTTPS.
+Instrukcja: [docs/GITHUB.md](docs/GITHUB.md). Pierwszy przebieg Actions i HIL OTA
+nie zostaly jeszcze wykonane.

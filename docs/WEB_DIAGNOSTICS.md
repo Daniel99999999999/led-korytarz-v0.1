@@ -1,6 +1,6 @@
 # Panel diagnostyczny HTTPS
 
-Firmware v0.10.1 udostepnia `https://sterownik-led.local/` i `https://<IPv4 ESP32>/`.
+Firmware v0.10.2 udostepnia `https://sterownik-led.local/` i `https://<IPv4 ESP32>/`.
 Adres IP odczytaj z `wifi status` lub z listy klientow routera. LCD nie jest wymagany.
 Windows moze nie rozwiazywac nazwy `.local`; wtedy uzyj IP.
 
@@ -39,6 +39,9 @@ Internetu i nie traktuj domyslnego `admin/admin` jako hasla docelowego.
 
 ## Proby na urzadzeniu
 
+- Sprawdz, ze `0.10.2` nie restartuje sie podczas tworzenia certyfikatu TLS;
+  w logach WWW odczytaj minimalny wolny stos zadania `web_start` (16 KiB).
+- Sprawdz, ze konsola UART jest gotowa takze wtedy, gdy HTTPS nie wystartuje.
 - Sprawdz dostep przez IP oraz `.local`, odcisk certyfikatu i brak HTTP panelu na porcie 80.
 - Sprawdz, ze `admin/admin` nie odczyta `/api/status` przed zmiana hasla.
 - Ustaw haslo przez WWW lub UART; potwierdz `settings status`, restart i logowanie nowym haslem.
@@ -60,3 +63,8 @@ ustawienie wraca do domyslnego trybu.
 HIL: podczas wpisywania polecen wywolaj reconnect MQTT i sprawdz brak tekstu
 logow miedzy znakami; uruchom `logs on`, potwierdz widoczne ESP_LOG, potem
 `logs off` i potwierdz cisze UART oraz dalsze aktualizowanie logow WWW.
+
+Wersja `0.10.1` na sprzecie restartowala sie z komunikatem `stack overflow in
+task main` przed startem panelu. W `0.10.2` przygotowanie TLS i HTTPS dziala
+w jednorazowym zadaniu z osobnym stosem, po uruchomieniu konsoli. Kompilacja
+nie potwierdza jeszcze naprawy na urzadzeniu.

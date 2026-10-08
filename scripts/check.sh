@@ -177,6 +177,7 @@ if grep -ERiq 'led[_-]korytarz|CorridorController|corridor_control|Projekt lokal
 fi
 
 python scripts/check_utf8.py
+python scripts/test_release_artifact.py
 
 echo "==> Build ESP32 DOIT DevKit V1"
 pio run -e esp32doit-devkit-v1

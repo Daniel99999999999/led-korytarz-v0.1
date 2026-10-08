@@ -19,9 +19,31 @@
 #include "esp_app_desc.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include <cstdint>
+#include <cstdio>
 
 namespace {
 constexpr char kTag[] = "main";
+#if LED_CONTROLLER_AT24C08_ENABLED
+constexpr std::uint32_t kWebStartupStackSize = 16U * 1024U;
+
+void webStartupTask(void* context) {
+    auto& web = *static_cast<WebDiagnosticsService*>(context);
+    esp_err_t result = web.initialize();
+    if (result == ESP_OK)
+        result = web.start();
+    if (result != ESP_OK) {
+        ESP_LOGW(kTag, "Panel HTTPS niedostepny: %s", esp_err_to_name(result));
+        std::printf("Panel HTTPS niedostepny: %s\n", esp_err_to_name(result));
+    }
+    ESP_LOGI(kTag, "Zadanie startowe HTTPS: minimalny wolny stos %u B",
+             static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+    vTaskDelete(nullptr);
+}
+#endif
 }
 
 extern "C" void app_main() {
@@ -130,24 +152,19 @@ extern "C" void app_main() {
     }
 
     esp_err_t console_result = service_console.initialize();
-#if LED_CONTROLLER_AT24C08_ENABLED
-    if (wifi_prepare_result == ESP_OK && settings_prepare_result == ESP_OK) {
-        const esp_err_t web_prepare_result = web_diagnostics.initialize();
-        if (web_prepare_result == ESP_OK) {
-            const esp_err_t web_start_result = web_diagnostics.start();
-            if (web_start_result != ESP_OK)
-                ESP_LOGW(kTag, "Panel WWW niedostepny: %s", esp_err_to_name(web_start_result));
-        } else {
-            ESP_LOGW(kTag, "Panel HTTPS niedostepny (NVS/tozsamosc): %s",
-                     esp_err_to_name(web_prepare_result));
-        }
-    }
-#endif
-
     if (console_result == ESP_OK)
         console_result = service_console.start();
     if (console_result != ESP_OK)
         ESP_LOGE(kTag, "Konsola serwisowa niedostepna: %s", esp_err_to_name(console_result));
+
+#if LED_CONTROLLER_AT24C08_ENABLED
+    if (wifi_prepare_result == ESP_OK && settings_prepare_result == ESP_OK &&
+        xTaskCreate(webStartupTask, "web_start", kWebStartupStackSize, &web_diagnostics, 2,
+                    nullptr) != pdPASS) {
+        ESP_LOGW(kTag, "Nie mozna utworzyc zadania HTTPS; sterowanie lokalne dziala");
+        std::printf("Panel HTTPS niedostepny: brak pamieci zadania\n");
+    }
+#endif
 
     // app_main moze sie zakonczyc. Sterowanie przejmuje zadanie FreeRTOS.
 }

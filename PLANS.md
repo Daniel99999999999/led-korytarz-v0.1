@@ -976,3 +976,17 @@ Brak sieci, NVS, MQTT, EEPROM i LCD nie zatrzymuje lokalnego sterowania.
 Zmiana hasla w lokalnym pliku Mosquitto wymagala restartu procesu brokera.
 Po restarcie polaczenie TCP ESP32 z brokerem pozostalo stabilne przez ponad 12 s;
 status sesji MQTT z UART pozostaje do potwierdzenia.
+
+## 2026-10-08 - v0.10.2: start HTTPS i publikacja OTA
+
+- [x] Przeanalizowac log bootloopu `0.10.1` i potwierdzic przepelnienie stosu zadania main.
+- [x] Uruchomic konsole przed HTTPS i przeniesc inicjalizacje TLS do jednorazowego zadania 16 KiB.
+- [x] Podniesc PROJECT_VER do 0.10.2, aby OTA odrzucalo starszy obraz.
+- [x] Domknac workflow wydania po tagu, manifest i tryb OTA korzystajacy z Release.
+- [x] Uruchomic check.sh, build pelnego profilu OTA oraz testy skryptow.
+- [ ] Skonfigurowac sekret GitHub, wykonac pierwszy przebieg Actions i obejrzec Release.
+- [ ] HIL: potwierdzic stabilny start, wolny stos zadania HTTPS, UART, panel i MQTT.
+
+Nie publikowac jeszcze taga ani obrazu. Na sprzecie `0.10.1` restartuje sie po
+przywroceniu konfiguracji; log wskazuje task main, a dokladna funkcja jest ukryta
+przez uszkodzony backtrace. Brak LCD/DS18B20 nie jest przyczyna resetu.

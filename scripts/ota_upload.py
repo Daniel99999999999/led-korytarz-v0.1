@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -98,13 +99,14 @@ def add_cache_buster(url: str, digest: str) -> str:
     return candidate
 
 
-def verify_remote_artifact(url: str, expected_digest: str, expected_size: int) -> None:
+def verify_remote_artifact(url: str, expected_digest: str, expected_size: int) -> bytes:
     request = urllib.request.Request(
         url,
         headers={"Cache-Control": "no-cache", "User-Agent": "PlatformIO-sterownik-led-OTA/1"},
     )
     digest = hashlib.sha256()
     size = 0
+    header = bytearray()
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             while True:
@@ -113,15 +115,83 @@ def verify_remote_artifact(url: str, expected_digest: str, expected_size: int) -
                     break
                 digest.update(chunk)
                 size += len(chunk)
+                if len(header) < 512:
+                    header.extend(chunk[: 512 - len(header)])
     except (OSError, urllib.error.URLError) as error:
         raise OtaUploadError("Nie mozna pobrac firmware_url: %s" % error) from error
 
     if size != expected_size or digest.hexdigest() != expected_digest:
         raise OtaUploadError(
-            "Serwer HTTPS nie udostepnia aktualnie zbudowanego firmware.bin "
-            "(lokalnie %u B, zdalnie %u B)" % (expected_size, size)
+            "Serwer HTTPS nie udostepnia oczekiwanego firmware.bin "
+            "(oczekiwano %u B, zdalnie %u B)" % (expected_size, size)
         )
-    print("OTA: SHA-256 pliku na serwerze zgodny z lokalnym buildem")
+    print("OTA: rozmiar i SHA-256 pliku na serwerze sa zgodne")
+    return bytes(header)
+
+
+def release_manifest_url(firmware_url: str) -> str:
+    parsed = urllib.parse.urlsplit(firmware_url)
+    if not parsed.path.endswith("/firmware.bin") or parsed.query:
+        raise OtaUploadError(
+            "Tryb release wymaga URL konczacego sie na /firmware.bin bez parametrow"
+        )
+    url = urllib.parse.urlunsplit(
+        parsed._replace(path=parsed.path[: -len("firmware.bin")] + "release.json")
+    )
+    validate_ota_url(url)
+    return url
+
+
+def validate_release_manifest(manifest: Any, local_version: str) -> Tuple[str, int]:
+    if not isinstance(manifest, dict):
+        raise OtaUploadError("release.json musi byc obiektem JSON")
+    expected = {
+        "schema": 1,
+        "project": EXPECTED_PROJECT,
+        "version": local_version,
+        "tag": "v" + local_version,
+        "profile": "esp32doit-devkit-v1-ota",
+        "filename": "firmware.bin",
+    }
+    if any(type(manifest.get(key)) is not type(value) or manifest.get(key) != value
+           for key, value in expected.items()):
+        raise OtaUploadError("release.json nie zgadza sie z lokalna wersja lub profilem OTA")
+    size = manifest.get("size")
+    digest = manifest.get("sha256")
+    commit = manifest.get("source_commit")
+    if type(size) is not int or not 0 < size <= 0x1D0000:
+        raise OtaUploadError("Niepoprawny rozmiar obrazu w release.json")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise OtaUploadError("Niepoprawny SHA-256 w release.json")
+    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise OtaUploadError("Niepoprawny commit zrodel w release.json")
+    return digest, size
+
+
+def verify_release_artifact(firmware_url: str, local_version: str) -> str:
+    manifest_url = release_manifest_url(firmware_url)
+    request = urllib.request.Request(
+        manifest_url,
+        headers={"Cache-Control": "no-cache", "User-Agent": "PlatformIO-sterownik-led-OTA/1"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read(4097)
+        if len(data) > 4096:
+            raise OtaUploadError("release.json przekracza limit 4096 B")
+        manifest = json.loads(data.decode("utf-8"))
+    except (OSError, urllib.error.URLError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise OtaUploadError("Nie mozna odczytac release.json: %s" % error) from error
+    digest, size = validate_release_manifest(manifest, local_version)
+    ota_url = add_cache_buster(firmware_url, digest)
+    header = verify_remote_artifact(ota_url, digest, size)
+    _, version = parse_app_descriptor(header)
+    if version != local_version:
+        raise OtaUploadError("Wersja opublikowanego obrazu rozni sie od lokalnej wersji")
+    print("OTA: sprawdzono Release %s, commit %s" % (
+        manifest["tag"], manifest["source_commit"]
+    ))
+    return ota_url
 
 
 def encode_mqtt_length(value: int) -> bytes:
@@ -417,11 +487,19 @@ def main() -> int:
     digest = hashlib.sha256(image).hexdigest()
     print("OTA: obraz %s, wersja %s, %u B" % (project, version, len(image)))
 
-    publish_local_artifact(firmware_path, config.get("publish_path"))
     base_url = require_string(config, "firmware_url")
     validate_ota_url(base_url)
-    ota_url = add_cache_buster(base_url, digest)
-    verify_remote_artifact(ota_url, digest, len(image))
+    artifact_source = config.get("artifact_source", "local")
+    if artifact_source == "release":
+        if config.get("publish_path") is not None:
+            raise OtaUploadError("Tryb release wymaga publish_path: null")
+        ota_url = verify_release_artifact(base_url, version)
+    elif artifact_source == "local":
+        publish_local_artifact(firmware_path, config.get("publish_path"))
+        ota_url = add_cache_buster(base_url, digest)
+        verify_remote_artifact(ota_url, digest, len(image))
+    else:
+        raise OtaUploadError("artifact_source musi miec wartosc local albo release")
     run_ota(config, ota_url, version)
     return 0
 

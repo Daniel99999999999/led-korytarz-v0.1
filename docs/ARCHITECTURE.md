@@ -94,3 +94,13 @@ wycisza tylko ten strumien; odpowiedzi `printf` konsoli, logi WWW i opcjonalny
 bufor diagnostyki MQTT pozostaja niezalezne. Komendy `logs status`, `logs on`
 i `logs off` pozwalaja czasowo przywrocic logi na UART. Ustawienie nie jest
 zapisywane i po resecie wraca do trybu startowego.
+
+## Start HTTPS v0.10.2
+
+`app_main()` uruchamia lokalny kontroler i konsolę przed zadaniem `web_start`.
+Zadanie ma osobny stos 16 KiB, tworzy/odczytuje tożsamość TLS, uruchamia
+serwer HTTPS i kończy się; właściwy serwer ma własne zadanie. Błąd alokacji
+lub inicjalizacji panelu nie zatrzymuje sterowania lokalnego. Minimalny wolny
+stos zadania startowego jest logowany do diagnostyki. To ogranicza regresję
+`0.10.1`, w której inicjalizacja MbedTLS na stosie `main` powodowała bootloop.
+Wymagany jest HIL startu z pustym NVS certyfikatu i z certyfikatem zapisanym.

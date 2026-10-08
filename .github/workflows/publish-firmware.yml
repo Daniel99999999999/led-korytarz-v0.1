@@ -1,0 +1,71 @@
+name: Publish OTA firmware
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firmware-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout tagged sources
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: python -m pip install --disable-pip-version-check platformio==6.2.0
+
+      - name: Verify tag and project version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/release_artifact.py "$RELEASE_TAG"
+
+      - name: Run project checks
+        run: bash ./scripts/check.sh
+
+      - name: Build full OTA profile
+        run: pio run -e esp32doit-devkit-v1-ota
+
+      - name: Validate image and prepare assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python scripts/release_artifact.py "$RELEASE_TAG" \
+            --image .pio/build/esp32doit-devkit-v1-ota/firmware.bin \
+            --commit "$(git rev-parse HEAD)" \
+            --output-dir .pio/release
+
+      - name: Verify packaged checksum
+        working-directory: .pio/release
+        run: sha256sum -c SHA256SUMS
+
+      - name: Publish to public firmware repository
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "Missing RELEASE_REPO_TOKEN repository secret" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            .pio/release/firmware.bin \
+            .pio/release/release.json \
+            .pio/release/SHA256SUMS \
+            --repo Daniel99999999999/led-korytarz-firmware \
+            --title "$RELEASE_TAG" \
+            --notes-file .pio/release/RELEASE_NOTES.md
