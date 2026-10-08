@@ -1,6 +1,6 @@
 # Panel diagnostyczny HTTPS
 
-Firmware v0.10.2 udostepnia `https://sterownik-led.local/` i `https://<IPv4 ESP32>/`.
+Firmware od v0.10.2 udostepnia `https://sterownik-led.local/` i `https://<IPv4 ESP32>/`.
 Adres IP odczytaj z `wifi status` lub z listy klientow routera. LCD nie jest wymagany.
 Windows moze nie rozwiazywac nazwy `.local`; wtedy uzyj IP.
 
@@ -39,7 +39,7 @@ Internetu i nie traktuj domyslnego `admin/admin` jako hasla docelowego.
 
 ## Proby na urzadzeniu
 
-- Sprawdz, ze `0.10.2` nie restartuje sie podczas tworzenia certyfikatu TLS;
+- Sprawdz, ze aktualna wersja nie restartuje sie podczas tworzenia certyfikatu TLS;
   w logach WWW odczytaj minimalny wolny stos zadania `web_start` (16 KiB).
 - Sprawdz, ze konsola UART jest gotowa takze wtedy, gdy HTTPS nie wystartuje.
 - Sprawdz dostep przez IP oraz `.local`, odcisk certyfikatu i brak HTTP panelu na porcie 80.
@@ -66,5 +66,10 @@ logow miedzy znakami; uruchom `logs on`, potwierdz widoczne ESP_LOG, potem
 
 Wersja `0.10.1` na sprzecie restartowala sie z komunikatem `stack overflow in
 task main` przed startem panelu. W `0.10.2` przygotowanie TLS i HTTPS dziala
-w jednorazowym zadaniu z osobnym stosem, po uruchomieniu konsoli. Kompilacja
-nie potwierdza jeszcze naprawy na urzadzeniu.
+w jednorazowym zadaniu z osobnym stosem, po uruchomieniu konsoli. Na ESP32
+potwierdzono logowanie, zmiane hasla, Wi-Fi, MQTT i NTP bez widocznego restartu.
+Nadal trzeba odczytac minimalny wolny stos zadania `web_start` i sprawdzic
+dluzsza prace. `-0x7780` podczas TLS oznacza alarm od klienta, mozliwy przy
+odrzuceniu samopodpisanego certyfikatu; pojedyncze 404 dla `/favicon.ico` jest
+nieszkodliwym zadaniem przegladarki. `0.10.3` usuwa okresowe ostrzezenie
+`1-wire.device` przy pustej magistrali; wymaga testu z czujnikiem i bez niego.

@@ -990,3 +990,19 @@ status sesji MQTT z UART pozostaje do potwierdzenia.
 Nie publikowac jeszcze taga ani obrazu. Na sprzecie `0.10.1` restartuje sie po
 przywroceniu konfiguracji; log wskazuje task main, a dokladna funkcja jest ukryta
 przez uszkodzony backtrace. Brak LCD/DS18B20 nie jest przyczyna resetu.
+
+HIL `0.10.2`: uzytkownik potwierdzil dzialanie HTTPS, zmiany hasla, Wi-Fi,
+MQTT i NTP bez widocznego bootloopu. W przekazanym logu nie ma jeszcze
+minimalnego wolnego stosu `web_start` ani wyniku dluzszego testu stabilnosci.
+
+## 2026-10-08 - v0.10.3: pusty 1-Wire
+
+- [x] Wyjasnic `-0x7780` jako alarm TLS od klienta; zachowac diagnostyke serwera.
+- [x] Ominac ostrzezenie iteratora ROM, gdy brak impulsu obecnosci DS18B20.
+- [x] Uruchomic `check.sh` i zbudowac pelny profil OTA bez nowych ostrzezen.
+- [ ] HIL: sprawdzic pusty GPIO4 przez kilka minut i ponownie podlaczony DS18B20.
+
+Nie zmieniac GPIO, przypisan czujnikow ani ustawien EEPROM. Wydanie OTA po
+tagu `v0.10.3` dopiero po potwierdzeniu stabilnosci urzadzenia.
+`check.sh`: 6/6 testow skryptow, 2/2 testy hostowe i build bazowy PASS.
+Profil OTA: PASS, deskryptor `led_controller/0.10.3`, obraz 1 377 952 B.

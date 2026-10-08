@@ -2,12 +2,13 @@
 
 ## Aktualny stan (2026-10-08)
 
-Biezaca wersja zrodel to `0.10.2`. `0.10.1` na urzadzeniu wpadla w bootloop
-(`stack overflow in task main`). Poprawka startu HTTPS, buildy i testy sa
-opisane na koncu tego pliku; HIL `0.10.2` nie zostal jeszcze wykonany.
+Biezaca wersja zrodel to `0.10.3`. `0.10.1` na urzadzeniu wpadla w bootloop
+(`stack overflow in task main`). W `0.10.2` uzytkownik potwierdzil dzialanie
+HTTPS, zmiany hasla, Wi-Fi, MQTT i NTP bez widocznego restartu. `0.10.3`
+usuwa cykliczne ostrzezenie biblioteki przy pustej magistrali 1-Wire.
 Publikacja OTA przez tag jest przygotowana, ale nie uruchomiona i wymaga sekretu
 GitHub `RELEASE_REPO_TOKEN`. Nie wgrywac starego obrazu `0.10.1` ani nie
-zakladac, ze sama kompilacja potwierdzila usuniecie bootloopu.
+zakladac, ze log 0.10.2 potwierdzil margines stosu lub dluzsza stabilnosc.
 
 ## v0.9.1 - obraz do OTA przez GitHub
 
@@ -355,3 +356,13 @@ ale nie uruchamia OTA. Lokalny uploader ma jawny tryb `artifact_source=release`
 dla obrazu z CI; stary tryb local nadal wymaga identycznego SHA lokalnego i HTTPS.
 Instrukcja: [docs/GITHUB.md](docs/GITHUB.md). Pierwszy przebieg Actions i HIL OTA
 nie zostaly jeszcze wykonane.
+
+## 2026-10-08: v0.10.3 (kod, bez HIL)
+
+Log z 0.10.2 potwierdzil prace HTTPS, zmiane hasla, Wi-Fi, MQTT i NTP.
+Kod `-0x7780` MbedTLS oznacza alarm od klienta podczas uzgadniania TLS;
+udane pozniejsze logowanie nie wskazuje awarii serwera. Przy braku DS18B20
+biblioteka wypisywala ostrzezenie co 30 s. Skan najpierw sprawdza impuls
+obecnosci bez logowania, a dopiero potem uruchamia iterator ROM. Inne bledy
+1-Wire sa nadal raportowane. Test na ESP32 z pustym GPIO4 oraz z podlaczonym
+DS18B20 pozostaje do wykonania.

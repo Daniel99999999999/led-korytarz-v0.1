@@ -6,6 +6,7 @@
 #include "Ds18b20Service.hpp"
 #include "TemperatureModel.hpp"
 #include "esp_log.h"
+#include "onewire_bus.h"
 #include "onewire_bus_impl_rmt.h"
 #include "onewire_cmd.h"
 #include "onewire_device.h"
@@ -265,40 +266,48 @@ esp_err_t Ds18b20Service::scanBus(const TickType_t now, const bool explicit_scan
         }
     }
 
-    onewire_device_iter_handle_t iterator = nullptr;
-    esp_err_t result = onewire_new_device_iter(bus_, &iterator);
-    if (result != ESP_OK) {
-        publishBusState(result, true, false);
-        return result;
-    }
-
     std::array<std::uint64_t, board_config::kDs18b20MaximumDeviceCount> found{};
     std::size_t found_count = 0U;
     bool overflow = false;
-    for (;;) {
-        onewire_device_t device{};
-        result = onewire_device_iter_get_next(iterator, &device);
+    // A missing presence pulse is normal on an empty bus; the iterator logs it as a warning.
+    const esp_err_t presence = onewire_bus_reset(bus_);
+    if ((presence != ESP_OK) && (presence != ESP_ERR_NOT_FOUND)) {
+        publishBusState(presence, true, false);
+        return presence;
+    }
+    if (presence == ESP_OK) {
+        onewire_device_iter_handle_t iterator = nullptr;
+        esp_err_t result = onewire_new_device_iter(bus_, &iterator);
         if (result != ESP_OK) {
-            break;
+            publishBusState(result, true, false);
+            return result;
         }
-        if (!temperature_model::romIsValid(device.address)) {
-            continue;
+
+        for (;;) {
+            onewire_device_t device{};
+            result = onewire_device_iter_get_next(iterator, &device);
+            if (result != ESP_OK) {
+                break;
+            }
+            if (!temperature_model::romIsValid(device.address)) {
+                continue;
+            }
+            if (found_count < found.size()) {
+                found[found_count++] = device.address;
+            } else {
+                overflow = true;
+            }
         }
-        if (found_count < found.size()) {
-            found[found_count++] = device.address;
-        } else {
-            overflow = true;
+        const esp_err_t delete_result = onewire_del_device_iter(iterator);
+        if ((result == ESP_ERR_NOT_FOUND) && (delete_result == ESP_OK)) {
+            result = ESP_OK;
+        } else if ((result == ESP_ERR_NOT_FOUND) && (delete_result != ESP_OK)) {
+            result = delete_result;
         }
-    }
-    const esp_err_t delete_result = onewire_del_device_iter(iterator);
-    if ((result == ESP_ERR_NOT_FOUND) && (delete_result == ESP_OK)) {
-        result = ESP_OK;
-    } else if ((result == ESP_ERR_NOT_FOUND) && (delete_result != ESP_OK)) {
-        result = delete_result;
-    }
-    if (result != ESP_OK) {
-        publishBusState(result, true, false);
-        return result;
+        if (result != ESP_OK) {
+            publishBusState(result, true, false);
+            return result;
+        }
     }
 
     std::sort(found.begin(), found.begin() + static_cast<std::ptrdiff_t>(found_count));

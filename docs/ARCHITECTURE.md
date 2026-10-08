@@ -104,3 +104,9 @@ lub inicjalizacji panelu nie zatrzymuje sterowania lokalnego. Minimalny wolny
 stos zadania startowego jest logowany do diagnostyki. To ogranicza regresję
 `0.10.1`, w której inicjalizacja MbedTLS na stosie `main` powodowała bootloop.
 Wymagany jest HIL startu z pustym NVS certyfikatu i z certyfikatem zapisanym.
+
+## Skan 1-Wire v0.10.3
+
+Skan DS18B20 co 30 s sprawdza najpierw impuls obecnosci. Pusta magistrala jest
+stanem normalnym i nie wywoluje ostrzezen iteratora ROM; inne bledy 1-Wire
+pozostaja widoczne. Skan reczny nadal odswieza stan czujnikow.

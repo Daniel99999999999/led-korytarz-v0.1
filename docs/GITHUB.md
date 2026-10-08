@@ -48,8 +48,8 @@ tag wersji `vMAJOR.MINOR.PATCH` w prywatnym repozytorium źródeł.
 2. Dopiero gdy wersja jest gotowa do testu sprzętowego, wypchnij tag, np.:
 
    ```powershell
-   git tag -a v0.10.2 -m "Firmware 0.10.2"
-   git push origin v0.10.2
+   git tag -a v0.10.3 -m "Firmware 0.10.3"
+   git push origin v0.10.3
    ```
 
 3. GitHub Actions uruchomi `check.sh`, zbuduje pełny profil OTA z przypiętego
@@ -73,6 +73,8 @@ Nie stosuj trybu `release` dla niezweryfikowanego wydania. Test uruchomienia,
 rollbacku i sterowania lokalnego na ESP32 jest odrębnym krokiem HIL.
 
 Wersja `0.10.1` z logu użytkownika restartuje się przez przepełnienie stosu main.
-Nie publikuj ani nie wgrywaj jej jako wydania. `0.10.2` wymaga kompilacji,
-publikacji i testu sprzętowego; sam opis powyżej nie oznacza ich wykonania.
+Nie publikuj ani nie wgrywaj jej jako wydania. `0.10.2` uruchomiono na ESP32:
+działają HTTPS, zmiana hasła, Wi-Fi, MQTT i NTP; nie potwierdzono jeszcze
+długotrwałej stabilności ani marginesu stosu. `0.10.3` nie została wgrana ani
+opublikowana; sam opis powyżej nie oznacza wykonania testu sprzętowego.
 
