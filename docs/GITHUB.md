@@ -72,11 +72,11 @@ tag wersji `vMAJOR.MINOR.PATCH` w prywatnym repozytorium źródeł.
    Istniejące wydanie nie jest nadpisywane. Sam Release **nie aktualizuje ESP32**.
 4. Sprawdź wynik Actions i trzy pliki w Release przed rozpoczęciem OTA.
 
-W `secrets.ota.json` ustaw `firmware_url` na
-`https://github.com/Daniel99999999999/led-korytarz-firmware/releases/download/TAG/firmware.bin`,
-zastępując `TAG` rzeczywistym tagiem. Dla obrazu budowanego przez GitHub Actions
-ustaw `"artifact_source": "release"` oraz `"publish_path": null`; zachowaj lokalne
-dane MQTT. Profil PlatformIO `esp32doit-devkit-v1-ota` -> Upload przebuduje lokalny
+W `secrets.ota.json` wystarczy stala wartosc
+`"firmware_repo": "Daniel99999999999/led-korytarz-firmware"` oraz
+`"artifact_source": "release"` i `"publish_path": null`; zachowaj lokalne
+dane MQTT. Lokalny skrypt migruje starszy `firmware_url` automatycznie.
+Profil PlatformIO `esp32doit-devkit-v1-ota` -> Upload przebuduje lokalny
 obraz, sprawdzi zgodność **wersji** z Release, pobierze manifest i publiczny obraz,
 zweryfikuje jego rozmiar, SHA-256 i deskryptor ESP-IDF, a dopiero potem wyśle
 komendę MQTT. Obrazy z dwóch komputerów mogą mieć różne SHA mimo tych samych źródeł.
@@ -86,9 +86,17 @@ poprzednią, ścisłą kontrolę SHA-256 obrazu lokalnego względem obrazu HTTPS
 Nie stosuj trybu `release` dla niezweryfikowanego wydania. Test uruchomienia,
 rollbacku i sterowania lokalnego na ESP32 jest odrębnym krokiem HIL.
 
+Wydanie `v0.10.3` opublikowano skryptem lokalnym; tag zrodel wskazuje
+`177bd3f32a0ec70b13c40c467cfad48a2695c65d`, a GitHub Actions zakonczyl
+sie sukcesem. MQTT OTA z `0.10.2` poczatkowo zwrocilo ESP_ERR_HTTP_CONNECT:
+log pokazal mbedtls_ssl_setup -0x008D (brak pamieci na TLS). Po restarcie EN,
+przy zamknietym panelu HTTPS i wyslaniu komendy zaraz po reconnect MQTT,
+obraz pobrano do 100% i sterownik potwierdzil `idle/0.10.3/ESP_OK`.
+Dlugotrwala stabilnosc oraz test przyciskow wymagaja dalszej obserwacji.
+
 Wersja `0.10.1` z logu użytkownika restartuje się przez przepełnienie stosu main.
 Nie publikuj ani nie wgrywaj jej jako wydania. `0.10.2` uruchomiono na ESP32:
 działają HTTPS, zmiana hasła, Wi-Fi, MQTT i NTP; nie potwierdzono jeszcze
-długotrwałej stabilności ani marginesu stosu. `0.10.3` nie została wgrana ani
-opublikowana; sam opis powyżej nie oznacza wykonania testu sprzętowego.
+długotrwałej stabilności ani marginesu stosu. Test sprzetowy potwierdzil
+przejscie OTA do `0.10.3`, ale nie pelne testy wszystkich funkcji sterownika.
 
