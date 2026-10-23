@@ -10,6 +10,7 @@
 #include "WifiService.hpp"
 #include "cJSON.h"
 #include "esp_app_desc.h"
+#include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "esp_https_server.h"
 #include "esp_log.h"
@@ -20,6 +21,7 @@
 #include "mdns.h"
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -29,6 +31,44 @@
 namespace {
 constexpr char kTag[] = "web_diagnostics";
 constexpr char kHostname[] = "sterownik-led";
+constexpr std::uint32_t kInternalHeapCaps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+std::atomic<std::uint32_t> tls_sessions_opened{0};
+std::atomic<std::uint32_t> tls_sessions_closed{0};
+std::atomic<std::int64_t> last_close_heap_log_us{0};
+
+std::uint32_t activeTlsSessions(const std::uint32_t opened, const std::uint32_t closed) noexcept {
+    return opened >= closed ? opened - closed : 0;
+}
+
+void onTlsSession(esp_https_server_user_cb_arg_t* const event) noexcept {
+    if (event->user_cb_state == HTTPD_SSL_USER_CB_SESS_CREATE) {
+        tls_sessions_opened.fetch_add(1, std::memory_order_relaxed);
+    } else if (event->user_cb_state == HTTPD_SSL_USER_CB_SESS_CLOSE) {
+        tls_sessions_closed.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void onHttpsDisconnected(void* const context, const esp_event_base_t base, const std::int32_t id,
+                         void* const data) noexcept {
+    static_cast<void>(context);
+    static_cast<void>(base);
+    static_cast<void>(id);
+    static_cast<void>(data);
+    const std::int64_t now_us = esp_timer_get_time();
+    const std::int64_t previous = last_close_heap_log_us.load(std::memory_order_relaxed);
+    if (previous != 0 && now_us - previous < 60LL * 1000LL * 1000LL)
+        return;
+    last_close_heap_log_us.store(now_us, std::memory_order_relaxed);
+    const auto opened = tls_sessions_opened.load(std::memory_order_relaxed);
+    const auto closed = tls_sessions_closed.load(std::memory_order_relaxed);
+    ESP_LOGI(kTag,
+             "HTTPS after close: sessions=%u/%u, active=%u, free=%u B, largest=%u B, minimum=%u B",
+             static_cast<unsigned>(opened), static_cast<unsigned>(closed),
+             static_cast<unsigned>(activeTlsSessions(opened, closed)),
+             static_cast<unsigned>(heap_caps_get_free_size(kInternalHeapCaps)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(kInternalHeapCaps)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(kInternalHeapCaps)));
+}
 constexpr char kSetupPage[] = R"HTML(<!doctype html><html lang="pl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Haslo | Sterownik LED</title>
 <style>:root{font-family:system-ui,sans-serif;color:#20292d;background:#f5f7f7}*{box-sizing:border-box}body{margin:0}header{background:#fff;border-bottom:1px solid #d8e0e1;padding:18px max(18px,calc((100vw - 720px)/2))}h1{font-size:23px;margin:0}main{max-width:720px;margin:38px auto;padding:0 18px}h2{font-size:20px}form{display:grid;gap:12px;max-width:380px}label{display:grid;gap:6px;font-size:14px}input{font:inherit;padding:9px;border:1px solid #aab9bc;border-radius:4px;background:#fff;min-width:0}button{font:inherit;padding:9px 14px;background:#127365;color:white;border:0;border-radius:4px;cursor:pointer}button:disabled{opacity:.5}#message{min-height:24px;color:#a45420;margin-top:16px}</style></head>
@@ -42,8 +82,24 @@ constexpr char kPage[] = R"HTML(<!doctype html>
 <title>Sterownik LED</title><style>
 :root{font-family:system-ui,sans-serif;color:#20292d;background:#f5f7f7}*{box-sizing:border-box}body{margin:0}header{background:#fff;border-bottom:1px solid #d8e0e1;padding:18px max(18px,calc((100vw - 1120px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px}h1{font-size:23px;margin:0;font-weight:650}h2{font-size:17px;margin:0 0 14px}main{max-width:1120px;margin:auto;padding:24px 18px 50px}.meta{font-size:13px;color:#657276}.summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;border-bottom:1px solid #d8e0e1;padding:0 0 22px}.summary section{min-width:0}.metric{display:grid;grid-template-columns:120px minmax(0,1fr);gap:7px;font-size:14px;margin:7px 0}.metric span{color:#657276}.metric strong{font-weight:550;overflow-wrap:anywhere}.ok{color:#127365}.warn{color:#a45420}.bad{color:#b53e37}.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;margin-top:25px}.rows{border-top:1px solid #d8e0e1}.row{display:grid;grid-template-columns:110px minmax(0,1fr) 85px;align-items:center;gap:14px;min-height:42px;border-bottom:1px solid #e2e8e9;font-size:14px}.track{height:7px;background:#e1e7e8}.fill{height:100%;background:#157e71}.off .fill{background:#9aa5a8}.muted{color:#687578}button{border:1px solid #becbcd;background:white;color:#233b40;padding:8px 12px;border-radius:4px;cursor:pointer;font:inherit}button:hover{border-color:#157e71}button:disabled{opacity:.5;cursor:default}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.logs{margin-top:30px;border-top:1px solid #d8e0e1;padding-top:20px}.logs-head{display:flex;justify-content:space-between;align-items:center;gap:10px}pre{background:#182225;color:#d9e9e5;padding:14px;min-height:180px;max-height:390px;overflow:auto;font:12px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:4px}#message{font-size:13px;min-height:18px;color:#a45420}@media(max-width:720px){header{padding:14px 18px}.summary,.grid{grid-template-columns:1fr;gap:18px}.grid{margin-top:20px}.row{grid-template-columns:92px minmax(0,1fr) 70px}}
 </style></head><body><header><div><h1>Sterownik LED</h1><div id="version" class="meta">Ladowanie...</div></div><div id="connection" class="meta">Laczenie</div></header><main><div class="summary"><section><h2>Sieć</h2><div id="wifi"></div></section><section><h2>MQTT</h2><div id="mqtt"></div></section><section><h2>System</h2><div id="system"></div></section></div><div class="grid"><section><h2>Kanały LED</h2><div id="channels" class="rows"></div></section><section><h2>Czujniki</h2><div id="sensors" class="rows"></div><div class="toolbar" style="margin-top:14px"><button id="wifi-scan" title="Skanuj sieci Wi-Fi">Skan Wi-Fi</button><button id="temp-scan" title="Skanuj magistralę 1-Wire">Skan temperatury</button></div></section></div><section class="logs"><div class="logs-head"><h2>Logi</h2><div class="toolbar"><button id="refresh" title="Odśwież status">Odśwież</button><button id="clear" title="Wyczyść widok logów">Wyczyść widok</button></div></div><div id="message" role="status"></div><pre id="log" aria-label="Logi urządzenia"></pre></section></main><script>
-const $=id=>document.getElementById(id);let cursor=0,busy=false;const value=(v,f='-')=>v===null||v===undefined||v===''?f:String(v);function metric(name,v){const d=document.createElement('div');d.className='metric';const a=document.createElement('span'),b=document.createElement('strong');a.textContent=name;b.textContent=value(v);d.append(a,b);return d}function block(id,items){const n=$(id);n.replaceChildren(...items.map(x=>metric(x[0],x[1])))}function row(name,v,percent){const d=document.createElement('div');d.className='row';const a=document.createElement('span'),b=document.createElement('div'),c=document.createElement('strong');a.textContent=name;c.textContent=v;if(percent===null){b.textContent='';}else{b.className='track';const f=document.createElement('div');f.className='fill';f.style.width=Math.max(0,Math.min(100,percent))+'%';b.append(f);if(!percent)d.classList.add('off')}d.append(a,b,c);return d}async function status(){const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const s=await r.json();$('version').textContent='Firmware '+value(s.version)+' · '+value(s.uptime_s)+' s';$('connection').textContent=s.wifi.state==='connected'?'Połączono':'Brak połączenia';block('wifi',[['Stan',s.wifi.state],['SSID',s.wifi.ssid],['IPv4',s.wifi.ip],['Sygnał',s.wifi.rssi===null?'-':s.wifi.rssi+' dBm'],['NTP',s.wifi.time]]);block('mqtt',[['Stan',s.mqtt.state],['Broker',s.mqtt.uri],['Połączenia',s.mqtt.connect_count],['Komendy',s.mqtt.accepted+'/'+s.mqtt.rejected],['Kolejka',s.mqtt.backlog?'oczekuje':'pusta']]);block('system',[['OTA',s.ota.state],['Postęp',s.ota.progress+'%'],['EEPROM',s.settings?s.settings.eeprom:'-'],['Rekord',s.settings?s.settings.record:'-']]);$('channels').replaceChildren(...s.channels.map((x,i)=>row('Kanał '+(i+1),x.on?x.brightness+'%':'OFF',x.on?x.brightness:0)));const sensor=[];s.pir.forEach((x,i)=>sensor.push(row('PIR '+(i+1),x?'ruch':'spokój',null)));if(s.ina){sensor.push(row('Prąd',s.ina.valid?s.ina.current_ma+' mA':'brak pomiaru',null));sensor.push(row('Napięcie',s.ina.valid?(s.ina.voltage_mv/1000).toFixed(2)+' V':'-',null));sensor.push(row('Moc',s.ina.valid?s.ina.power_mw+' mW':'-',null))}if(s.temperature){s.temperature.roles.forEach(x=>sensor.push(row(x.name,x.valid?(x.millicelsius/1000).toFixed(1)+' °C':'-',null)))}$('sensors').replaceChildren(...sensor);$('temp-scan').hidden=!s.temperature}
-async function logs(){const r=await fetch('/api/logs?after='+cursor,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();if(data.gap)$('log').textContent+='[starsze logi nadpisane]\n';for(const item of data.entries){$('log').textContent+=item.text.replace(/\r/g,'');cursor=item.sequence}if(data.entries.length)$('log').scrollTop=$('log').scrollHeight}async function poll(){if(busy)return;busy=true;try{await status();await logs();$('message').textContent=''}catch(e){$('message').textContent='Nie można pobrać danych: '+e.message}finally{busy=false}}async function command(path){try{const r=await fetch(path,{method:'POST',headers:{'X-Device-Action':'1'}});$('message').textContent=r.ok?'Skan zlecony':('Polecenie odrzucone: HTTP '+r.status)}catch(e){$('message').textContent='Brak połączenia'}}$('wifi-scan').onclick=()=>command('/api/scan/wifi');$('temp-scan').onclick=()=>command('/api/scan/temperature');$('refresh').onclick=poll;$('clear').onclick=()=>{$('log').textContent=''};poll();setInterval(poll,2000);
+const $=id=>document.getElementById(id);let cursor=0,busy=false;
+const value=(v,f='-')=>v===null||v===undefined||v===''?f:String(v);
+function metric(name,v){const d=document.createElement('div');d.className='metric';const a=document.createElement('span'),b=document.createElement('strong');a.textContent=name;b.textContent=value(v);d.append(a,b);return d}
+function block(id,items){const n=$(id);n.replaceChildren(...items.map(x=>metric(x[0],x[1])))}
+function row(name,v,percent){const d=document.createElement('div');d.className='row';const a=document.createElement('span'),b=document.createElement('div'),c=document.createElement('strong');a.textContent=name;c.textContent=v;if(percent===null){b.textContent='';}else{b.className='track';const f=document.createElement('div');f.className='fill';f.style.width=Math.max(0,Math.min(100,percent))+'%';b.append(f);if(!percent)d.classList.add('off')}d.append(a,b,c);return d}
+async function status(){
+const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const s=await r.json();
+$('version').textContent='Firmware '+value(s.version)+' · '+value(s.uptime_s)+' s';
+$('connection').textContent=s.wifi.state==='connected'?'Połączono':'Brak połączenia';
+block('wifi',[['Stan',s.wifi.state],['SSID',s.wifi.ssid],['IPv4',s.wifi.ip],['Sygnał',s.wifi.rssi===null?'-':s.wifi.rssi+' dBm'],['NTP',s.wifi.time]]);
+block('mqtt',[['Stan',s.mqtt.state],['Broker',s.mqtt.uri],['Połączenia',s.mqtt.connect_count],['Komendy',s.mqtt.accepted+'/'+s.mqtt.rejected],['Birth',s.mqtt.birth_queued?'w kolejce':'oczekuje'],['Subskrypcje',s.mqtt.subscriptions_done+'/'+s.mqtt.subscriptions_total+(s.mqtt.subscriptions_ready?' OK':'')],['Discovery',s.mqtt.discovery_confirmed?'PUBACK':(s.mqtt.discovery_queued?'w kolejce':'oczekuje')],['JSON',s.mqtt.discovery_bytes+' B'],['Outbox',s.mqtt.outbox_bytes+' B'],['Blad sync',s.mqtt.sync_error],['Kolejka',s.mqtt.backlog?'oczekuje':'pusta']]);
+block('system',[['OTA',s.ota.state],['Postęp',s.ota.progress+'%'],['EEPROM',s.settings?s.settings.eeprom:'-'],['Rekord',s.settings?s.settings.record:'-']]);
+$('channels').replaceChildren(...s.channels.map((x,i)=>row('Kanał '+(i+1),x.on?x.brightness+'%':'OFF',x.on?x.brightness:0)));
+const sensor=[];s.pir.forEach((x,i)=>sensor.push(row('PIR '+(i+1),x?'ruch':'spokój',null)));
+if(s.ina){sensor.push(row('Prąd',s.ina.valid?s.ina.current_ma+' mA':'brak pomiaru',null));sensor.push(row('Napięcie',s.ina.valid?(s.ina.voltage_mv/1000).toFixed(2)+' V':'-',null));sensor.push(row('Moc',s.ina.valid?s.ina.power_mw+' mW':'-',null))}
+if(s.temperature){s.temperature.roles.forEach(x=>sensor.push(row(x.name,x.valid?(x.millicelsius/1000).toFixed(1)+' °C':'-',null)))}
+$('sensors').replaceChildren(...sensor);$('temp-scan').hidden=!s.temperature}
+async function logs(){const r=await fetch('/api/logs?after='+cursor,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();let text=data.gap?'[starsze logi nadpisane]\n':'';for(const item of data.entries){text+=item.text.replace(/\r/g,'');cursor=item.sequence}if(text){const view=$('log');view.textContent=(view.textContent+text).slice(-32768);view.scrollTop=view.scrollHeight}}async function poll(){if(busy)return;busy=true;try{await status();await logs();$('message').textContent=''}catch(e){$('message').textContent='Nie można pobrać danych: '+e.message}finally{busy=false}}async function command(path){try{const r=await fetch(path,{method:'POST',headers:{'X-Device-Action':'1'}});$('message').textContent=r.ok?'Skan zlecony':('Polecenie odrzucone: HTTP '+r.status)}catch(e){$('message').textContent='Brak połączenia'}}$('wifi-scan').onclick=()=>command('/api/scan/wifi');$('temp-scan').onclick=()=>command('/api/scan/temperature');$('refresh').onclick=poll;$('clear').onclick=()=>{$('log').textContent=''};poll();setInterval(poll,2000);
 const passwordLink=document.createElement('a');passwordLink.href='/password';passwordLink.textContent='Zmien haslo';passwordLink.className='meta';passwordLink.style.display='block';document.querySelector('header div:first-child').append(passwordLink);
 </script></body></html>)HTML";
 
@@ -154,11 +210,14 @@ void WebDiagnosticsService::logHeapStatus() noexcept {
     const std::int64_t now_us = esp_timer_get_time();
     if (last_heap_log_us_ != 0 && now_us - last_heap_log_us_ < kIntervalUs)
         return;
-    constexpr std::uint32_t kCaps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-    ESP_LOGI(kTag, "HTTPS RAM: wolne=%u B, najwiekszy blok=%u B, minimum=%u B",
-             static_cast<unsigned>(heap_caps_get_free_size(kCaps)),
-             static_cast<unsigned>(heap_caps_get_largest_free_block(kCaps)),
-             static_cast<unsigned>(heap_caps_get_minimum_free_size(kCaps)));
+    const auto opened = tls_sessions_opened.load(std::memory_order_relaxed);
+    const auto closed = tls_sessions_closed.load(std::memory_order_relaxed);
+    ESP_LOGI(kTag, "HTTPS RAM: sessions=%u/%u, active=%u, free=%u B, largest=%u B, minimum=%u B",
+             static_cast<unsigned>(opened), static_cast<unsigned>(closed),
+             static_cast<unsigned>(activeTlsSessions(opened, closed)),
+             static_cast<unsigned>(heap_caps_get_free_size(kInternalHeapCaps)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(kInternalHeapCaps)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(kInternalHeapCaps)));
     last_heap_log_us_ = now_us;
 }
 
@@ -174,6 +233,7 @@ esp_err_t WebDiagnosticsService::start() noexcept {
     config.httpd.max_uri_handlers = 7;
     config.httpd.recv_wait_timeout = 3;
     config.httpd.send_wait_timeout = 3;
+    config.user_cb = onTlsSession;
     config.servercert = tls_.certificate();
     config.servercert_len = tls_.certificateLength();
     config.prvtkey_pem = tls_.privateKey();
@@ -186,6 +246,15 @@ esp_err_t WebDiagnosticsService::start() noexcept {
         httpd_ssl_stop(server_);
         server_ = nullptr;
         return result;
+    }
+    if (!tls_event_registered_) {
+        result = esp_event_handler_instance_register(
+            ESP_HTTPS_SERVER_EVENT, HTTPS_SERVER_EVENT_DISCONNECTED, onHttpsDisconnected, nullptr,
+            &tls_event_instance_);
+        if (result == ESP_OK)
+            tls_event_registered_ = true;
+        else
+            ESP_LOGW(kTag, "HTTPS close RAM monitoring unavailable: %s", esp_err_to_name(result));
     }
     result = mdns_init();
     if (result == ESP_OK) {
@@ -436,16 +505,33 @@ esp_err_t WebDiagnosticsService::status(httpd_req_t* request) {
     if (service.mqtt_.tryGetStatus(mqtt_state)) {
         const char* uri = mqtt_state.uri.data();
         const char* shown_uri = std::strpbrk(uri, "@?#") == nullptr ? uri : "(ukryto)";
-        ok = addString(mqtt, "state", mqttState(mqtt_state.state)) &&
-             addString(mqtt, "uri", shown_uri) &&
-             addNumber(mqtt, "connect_count", mqtt_state.connect_count) &&
-             addNumber(mqtt, "accepted", mqtt_state.accepted_commands) &&
-             addNumber(mqtt, "rejected", mqtt_state.rejected_commands) &&
-             addBool(mqtt, "backlog", mqtt_state.publish_backlog) && ok;
+        ok =
+            addString(mqtt, "state", mqttState(mqtt_state.state)) &&
+            addString(mqtt, "uri", shown_uri) &&
+            addNumber(mqtt, "connect_count", mqtt_state.connect_count) &&
+            addNumber(mqtt, "accepted", mqtt_state.accepted_commands) &&
+            addNumber(mqtt, "rejected", mqtt_state.rejected_commands) &&
+            addBool(mqtt, "backlog", mqtt_state.publish_backlog) &&
+            addBool(mqtt, "birth_queued", mqtt_state.birth_queued) &&
+            addBool(mqtt, "subscriptions_ready", mqtt_state.subscriptions_ready) &&
+            addNumber(mqtt, "subscriptions_done", mqtt_state.subscriptions_done) &&
+            addNumber(mqtt, "subscriptions_total", mqtt_state.subscriptions_total) &&
+            addBool(mqtt, "discovery_queued", mqtt_state.discovery_queued) &&
+            addBool(mqtt, "discovery_confirmed", mqtt_state.discovery_confirmed) &&
+            addNumber(mqtt, "discovery_bytes", mqtt_state.discovery_payload_bytes) &&
+            addNumber(mqtt, "outbox_bytes", mqtt_state.outbox_bytes) &&
+            addString(mqtt, "sync_error", MqttService::syncErrorName(mqtt_state.last_sync_error)) &&
+            ok;
     } else {
         ok = addString(mqtt, "state", "busy") && addString(mqtt, "uri", "") &&
              addNumber(mqtt, "connect_count", 0) && addNumber(mqtt, "accepted", 0) &&
-             addNumber(mqtt, "rejected", 0) && addBool(mqtt, "backlog", false) && ok;
+             addNumber(mqtt, "rejected", 0) && addBool(mqtt, "backlog", false) &&
+             addBool(mqtt, "birth_queued", false) && addBool(mqtt, "subscriptions_ready", false) &&
+             addNumber(mqtt, "subscriptions_done", 0) &&
+             addNumber(mqtt, "subscriptions_total", MqttSyncMachine::kSubscriptionCount) &&
+             addBool(mqtt, "discovery_queued", false) &&
+             addBool(mqtt, "discovery_confirmed", false) && addNumber(mqtt, "discovery_bytes", 0) &&
+             addNumber(mqtt, "outbox_bytes", 0) && addString(mqtt, "sync_error", "busy") && ok;
     }
     const auto ota_state = service.ota_.status();
     ok = addString(ota, "state", OtaService::stateName(ota_state.state)) &&

@@ -2,7 +2,9 @@
 
 #include "FeatureConfig.hpp"
 #include "LocalControlConfig.hpp"
+#include "MqttDiscoveryPayload.hpp"
 #include "MqttPublishTracker.hpp"
+#include "MqttSyncMachine.hpp"
 #include "OtaService.hpp"
 #if LED_CONTROLLER_AT24C08_ENABLED
 #include "PersistentSettings.hpp"
@@ -47,6 +49,23 @@ class MqttService final {
         disconnected,
         authentication_error,
     };
+
+    enum class SyncError : std::uint8_t {
+        none,
+        subscribe_send,
+        subscribe_rejected,
+        subscribe_timeout,
+        discovery_puback_timeout,
+        birth_enqueue,
+        discovery_root,
+        discovery_local,
+        discovery_debug,
+        discovery_component,
+        discovery_buffer,
+        discovery_enqueue,
+    };
+
+    [[nodiscard]] static const char* syncErrorName(SyncError error) noexcept;
 
     struct ChannelState {
         std::uint8_t brightness_percent{100};
@@ -93,6 +112,16 @@ class MqttService final {
         bool password_set{false};
         bool pending_changes{false};
         bool publish_backlog{false};
+        bool birth_queued{false};
+        bool subscriptions_ready{false};
+        bool discovery_queued{false};
+        bool discovery_confirmed{false};
+        std::uint8_t subscriptions_done{0};
+        std::uint8_t subscriptions_total{
+            static_cast<std::uint8_t>(MqttSyncMachine::kSubscriptionCount)};
+        std::uint32_t discovery_payload_bytes{0};
+        std::uint32_t outbox_bytes{0};
+        SyncError last_sync_error{SyncError::none};
     };
 
     MqttService(LedController& controller, OtaService& ota_service,
@@ -125,12 +154,11 @@ class MqttService final {
     static constexpr std::uint32_t kReconnectIntervalMs = 5'000;
     static constexpr std::uint32_t kNetworkTimeoutMs = 3'000;
     static constexpr std::uint32_t kMinimumStatePublishIntervalMs = 200;
-    static constexpr std::uint32_t kSynchronizationSettleMs = 250;
     static constexpr std::uint32_t kPublishRetryIntervalMs = 500;
     static constexpr std::uint32_t kServiceTaskStackSize = 6'144;
     static constexpr UBaseType_t kServiceTaskPriority = 3;
     static constexpr std::size_t kTopicLength = 160;
-    static constexpr std::size_t kDiscoveryPayloadLength = 24'576;
+    static constexpr std::size_t kDiscoveryPayloadLength = mqtt_discovery::kPayloadCapacity;
     static constexpr std::size_t kMqttBufferLength = 8'192;
     static constexpr std::uint64_t kOutboxLimit = 32'768;
 
@@ -190,18 +218,22 @@ class MqttService final {
     void handleEvent(esp_mqtt_event_handle_t event) noexcept;
     void handleData(const esp_mqtt_event_t& event) noexcept;
     void requestSynchronization() noexcept;
-    bool synchronizeClient() noexcept;
+    void advanceSynchronization(std::uint32_t now_ms) noexcept;
+    [[nodiscard]] const char* subscriptionTopic(std::size_t index) const noexcept;
     bool publishSnapshot(const Snapshot& snapshot) noexcept;
     bool publishOtaStatus() noexcept;
     void serviceDebug() noexcept;
     void startClientWhenNetworkReady() noexcept;
-    bool publishDiscovery(esp_mqtt_client_handle_t client) noexcept;
+    int publishDiscovery(esp_mqtt_client_handle_t client) noexcept;
+    int enqueueMessageId(esp_mqtt_client_handle_t client, const char* topic, const char* payload,
+                         bool retain) noexcept;
     bool enqueueMessage(esp_mqtt_client_handle_t client, const char* topic, const char* payload,
                         bool retain) noexcept;
     esp_err_t stopClient(bool publish_offline) noexcept;
     esp_err_t createClient() noexcept;
     bool buildTopics(const RuntimeConfig& config) noexcept;
-    bool buildDiscoveryPayload() noexcept;
+    bool buildDiscoveryPayload(SyncError& failure, mqtt_discovery::StageObserver observer,
+                               void* observer_context) noexcept;
     void updateStatusFromConfigurationLocked() noexcept;
     void noteRejectedCommand() noexcept;
     void noteAcceptedCommand() noexcept;
@@ -233,6 +265,7 @@ class MqttService final {
     TopicLayout topics_{};
     std::array<char, 32> device_id_{};
     MqttPublishTracker publish_tracker_{};
+    MqttSyncMachine sync_machine_{};
     std::uint32_t ota_status_revision_published_{0};
     bool ota_status_published_{false};
     bool debug_status_published_{false};
@@ -241,6 +274,8 @@ class MqttService final {
     TickType_t debug_log_tick_{0};
     bool enqueue_error_reported_{false};
     std::array<char, kDiscoveryPayloadLength> discovery_payload_{};
+    bool discovery_payload_valid_{false};
+    std::size_t discovery_payload_bytes_{0};
     esp_mqtt_client_handle_t client_{nullptr};
     bool client_started_{false};
     bool start_retry_pending_{false};
@@ -248,6 +283,12 @@ class MqttService final {
     std::atomic<esp_mqtt_client_handle_t> active_client_{nullptr};
     std::atomic<bool> connected_{false};
     std::atomic<bool> synchronization_requested_{false};
+    std::atomic<std::uint32_t> connection_generation_{0};
+    std::atomic<int> last_suback_id_{0};
+    std::atomic<bool> last_suback_accepted_{false};
+    std::atomic<int> last_puback_id_{0};
+    std::atomic<int> discovery_message_id_{0};
+    std::atomic<bool> discovery_acknowledged_{false};
     std::atomic<bool> publish_backlog_{false};
     std::atomic<std::uint32_t> accepted_commands_{0};
     std::atomic<std::uint32_t> rejected_commands_{0};

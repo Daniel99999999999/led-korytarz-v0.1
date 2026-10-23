@@ -21,7 +21,8 @@ def main():
     run([args.compiler, "-c", "-ocjson.o", str(root / "managed_components/espressif__cjson/cJSON/cJSON.c")])
     flags = [args.compiler, "-tM", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fno-exceptions", "-fno-rtti"]
     run(flags + ["-I" + str(root / "src"), "-I" + str(root / "managed_components/espressif__cjson/cJSON"),
-        "-DCONFIG_LED_CONTROLLER_AT24C08=1", "-ologic.exe", str(root / "test/host/test_main.cpp")]
+        "-DCONFIG_LED_CONTROLLER_AT24C08=1", "-DCONFIG_LED_CONTROLLER_INA228=1",
+        "-DCONFIG_LED_CONTROLLER_DS18B20=1", "-ologic.exe", str(root / "test/host/test_main.cpp")]
         + [str(root / source) for source in sources] + ["cjson.o"])
     run([str(output / "logic.exe")])
     run(flags + ["-I" + str(root / "test/host/stubs"), "-I" + str(root / "src"), "-oadapters.exe"]

@@ -13,7 +13,9 @@
 #include "LocalControlDiscovery.hpp"
 #include "LocalOtaValidation.hpp"
 #include "MqttCommandParser.hpp"
+#include "MqttDiscoveryPayload.hpp"
 #include "MqttPublishTracker.hpp"
+#include "MqttSyncMachine.hpp"
 #include "NecDecoder.hpp"
 #include "OtaRequestValidator.hpp"
 #include "PersistentSettings.hpp"
@@ -24,8 +26,10 @@
 #include "WebLogBuffer.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -1270,6 +1274,381 @@ void testLocalControlDiscovery() noexcept {
     cJSON_Delete(components);
 }
 
+void testMqttSyncMachine() noexcept {
+    MqttSyncMachine sync;
+    sync.onConnected();
+    EXPECT_TRUE(sync.canQueueBirth(0));
+    EXPECT_TRUE(sync.canSubscribe(0));
+    EXPECT_TRUE(!sync.canQueueDiscovery(0));
+    sync.birthQueued();
+    sync.subscribeSent(10, 100);
+    EXPECT_TRUE(!sync.canSubscribe(101));
+    EXPECT_EQ(MqttSyncMachine::SubackResult::ignored, sync.onSuback(9, true, 102));
+    EXPECT_EQ(MqttSyncMachine::SubackResult::accepted, sync.onSuback(10, true, 103));
+    EXPECT_EQ(1U, sync.subscriptionIndex());
+
+    sync.subscribeFailed(200);
+    EXPECT_TRUE(!sync.canSubscribe(2'199));
+    EXPECT_TRUE(sync.canSubscribe(2'200));
+    sync.subscribeSent(11, 2'200);
+    EXPECT_TRUE(!sync.pollSubackTimeout(7'199));
+    EXPECT_TRUE(sync.pollSubackTimeout(7'200));
+    EXPECT_TRUE(!sync.canSubscribe(11'199));
+    EXPECT_TRUE(sync.canSubscribe(11'200));
+    sync.subscribeSent(12, 11'200);
+    EXPECT_EQ(MqttSyncMachine::SubackResult::rejected, sync.onSuback(12, false, 11'201));
+    EXPECT_TRUE(!sync.canSubscribe(19'200));
+    EXPECT_TRUE(sync.canSubscribe(19'201));
+
+    for (std::size_t index = 1; index < MqttSyncMachine::kSubscriptionCount; ++index) {
+        const int id = static_cast<int>(100 + index);
+        sync.subscribeSent(id, static_cast<std::uint32_t>(20'000 + index));
+        EXPECT_EQ(MqttSyncMachine::SubackResult::accepted,
+                  sync.onSuback(id, true, static_cast<std::uint32_t>(20'001 + index)));
+    }
+    EXPECT_TRUE(sync.subscriptionsReady());
+    EXPECT_TRUE(sync.canQueueDiscovery(21'000));
+    sync.discoveryFailed(21'000);
+    EXPECT_TRUE(!sync.canQueueDiscovery(25'999));
+    EXPECT_TRUE(sync.canQueueDiscovery(26'000));
+    EXPECT_TRUE(!sync.canSubscribe(26'000));
+    sync.discoveryQueued(501, 26'000);
+    EXPECT_TRUE(sync.discoveryQueued());
+    EXPECT_TRUE(!sync.discoveryConfirmed());
+    EXPECT_TRUE(!sync.confirmDiscovery(500));
+    EXPECT_TRUE(!sync.pollPubackTimeout(60'999));
+    EXPECT_TRUE(sync.pollPubackTimeout(61'000));
+    EXPECT_TRUE(!sync.discoveryQueued());
+    EXPECT_TRUE(!sync.canQueueDiscovery(70'999));
+    EXPECT_TRUE(sync.canQueueDiscovery(71'000));
+    // A late PUBACK for the still-pending outbox item cancels the retry.
+    EXPECT_TRUE(sync.confirmDiscovery(501));
+    EXPECT_TRUE(sync.discoveryConfirmed());
+    EXPECT_TRUE(!sync.canQueueDiscovery(71'000));
+
+    sync.onBirth();
+    EXPECT_TRUE(sync.subscriptionsReady());
+    EXPECT_TRUE(!sync.canSubscribe(30'000));
+    EXPECT_TRUE(sync.canQueueBirth(30'000));
+    EXPECT_TRUE(!sync.discoveryConfirmed());
+    sync.birthQueued();
+    EXPECT_TRUE(sync.canQueueDiscovery(30'000));
+    sync.onConnected();
+    EXPECT_EQ(0U, sync.subscriptionIndex());
+    EXPECT_TRUE(!sync.subscriptionsReady());
+    EXPECT_TRUE(sync.canQueueBirth(0));
+    EXPECT_EQ(MqttSyncMachine::SubackResult::ignored, sync.onSuback(501, true, 0));
+    EXPECT_TRUE(!sync.confirmDiscovery(501));
+
+    MqttSyncMachine missed_puback;
+    missed_puback.onConnected();
+    missed_puback.birthQueued();
+    for (std::size_t index = 0; index < MqttSyncMachine::kSubscriptionCount; ++index) {
+        const int id = static_cast<int>(index + 1U);
+        missed_puback.subscribeSent(id, 0);
+        EXPECT_EQ(MqttSyncMachine::SubackResult::accepted, missed_puback.onSuback(id, true, 1));
+    }
+    missed_puback.discoveryQueued(601, 100);
+    EXPECT_TRUE(missed_puback.pollPubackTimeout(35'100));
+    EXPECT_TRUE(missed_puback.canQueueDiscovery(40'100));
+    missed_puback.discoveryQueued(602, 40'100);
+    EXPECT_TRUE(!missed_puback.confirmDiscovery(601));
+    EXPECT_TRUE(missed_puback.confirmDiscovery(602));
+
+    sync.subscribeFailed(0xFFFFFF00U);
+    EXPECT_TRUE(!sync.canSubscribe(1'743));
+    EXPECT_TRUE(sync.canSubscribe(1'744));
+}
+
+void* CJSON_CDECL failJsonAllocation(const std::size_t size) noexcept {
+    static_cast<void>(size);
+    return nullptr;
+}
+
+void testDiscoveryJsonFragmentsAndFailures() noexcept {
+    cJSON* const root = cJSON_CreateObject();
+    EXPECT_TRUE(root != nullptr);
+    if (root == nullptr) {
+        return;
+    }
+    cJSON* const components = cJSON_AddObjectToObject(root, "cmps");
+    EXPECT_TRUE(components != nullptr);
+    if (components != nullptr) {
+        EXPECT_TRUE(local_control::appendDiscovery(components, "sterownik-led/device", "device"));
+        EXPECT_TRUE(debug_discovery::append(components, "sterownik-led/device", "device"));
+        EXPECT_EQ(24, cJSON_GetArraySize(components));
+        std::array<char, 24'576> payload{};
+        EXPECT_TRUE(
+            cJSON_PrintPreallocated(root, payload.data(), static_cast<int>(payload.size()), false));
+        cJSON* const parsed = cJSON_Parse(payload.data());
+        EXPECT_TRUE(parsed != nullptr);
+        if (parsed != nullptr) {
+            EXPECT_EQ(24, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(parsed, "cmps")));
+            cJSON_Delete(parsed);
+        }
+        std::array<char, 64> short_payload{};
+        EXPECT_TRUE(!cJSON_PrintPreallocated(root, short_payload.data(),
+                                             static_cast<int>(short_payload.size()), false));
+    }
+    cJSON_Delete(root);
+
+    cJSON* const empty_components = cJSON_CreateObject();
+    EXPECT_TRUE(empty_components != nullptr);
+    cJSON_Hooks failing_hooks{};
+    failing_hooks.malloc_fn = failJsonAllocation;
+    cJSON_InitHooks(&failing_hooks);
+    EXPECT_TRUE(!local_control::appendDiscovery(empty_components, "base", "device"));
+    EXPECT_TRUE(!debug_discovery::append(empty_components, "base", "device"));
+    cJSON_InitHooks(nullptr);
+    cJSON_Delete(empty_components);
+}
+
+struct DiscoveryFixture final {
+    mqtt_discovery::Topics topics{};
+    std::array<char, 128> base{};
+    std::array<char, 160> availability{}, ota_status{}, ina_availability{};
+    std::array<std::array<char, 160>, 5> command{}, state{}, ina_state{};
+    std::array<std::array<char, 160>, 2> pir{}, temperature_availability{}, temperature_state{};
+
+    explicit DiscoveryFixture(const char* prefix) noexcept {
+        constexpr char device_id[] = "sterownik_led_001122334455";
+        std::snprintf(base.data(), base.size(), "%s/%s", prefix, device_id);
+        std::snprintf(availability.data(), availability.size(), "%s/availability", base.data());
+        std::snprintf(ota_status.data(), ota_status.size(), "%s/ota/status", base.data());
+        std::snprintf(ina_availability.data(), ina_availability.size(), "%s/ina228/availability",
+                      base.data());
+        topics.base = base.data();
+        topics.availability = availability.data();
+        topics.ota_status = ota_status.data();
+        for (std::size_t i = 0; i < command.size(); ++i) {
+            std::snprintf(command[i].data(), command[i].size(), "%s/channel/%u/set", base.data(),
+                          static_cast<unsigned>(i + 1U));
+            std::snprintf(state[i].data(), state[i].size(), "%s/channel/%u/state", base.data(),
+                          static_cast<unsigned>(i + 1U));
+            topics.command[i] = command[i].data();
+            topics.state[i] = state[i].data();
+        }
+        for (std::size_t i = 0; i < pir.size(); ++i) {
+            std::snprintf(pir[i].data(), pir[i].size(), "%s/pir/%u/state", base.data(),
+                          static_cast<unsigned>(i + 1U));
+            topics.pir_state[i] = pir[i].data();
+        }
+#if LED_CONTROLLER_INA228_ENABLED
+        constexpr std::array<const char*, 5> suffix{
+            {"current_ma", "bus_voltage_mv", "power_mw", "energy_wh", "die_temperature_c"}};
+        topics.ina228_availability = ina_availability.data();
+        for (std::size_t i = 0; i < ina_state.size(); ++i) {
+            std::snprintf(ina_state[i].data(), ina_state[i].size(), "%s/ina228/%s", base.data(),
+                          suffix[i]);
+            topics.ina228_state[i] = ina_state[i].data();
+        }
+#endif
+#if LED_CONTROLLER_DS18B20_ENABLED
+        constexpr std::array<const char*, 2> roles{{"radiator", "enclosure"}};
+        for (std::size_t i = 0; i < temperature_state.size(); ++i) {
+            std::snprintf(temperature_availability[i].data(), temperature_availability[i].size(),
+                          "%s/temperature/%s/availability", base.data(), roles[i]);
+            std::snprintf(temperature_state[i].data(), temperature_state[i].size(),
+                          "%s/temperature/%s/state_c", base.data(), roles[i]);
+            topics.temperature_availability[i] = temperature_availability[i].data();
+            topics.temperature_state[i] = temperature_state[i].data();
+        }
+#endif
+    }
+};
+
+struct JsonAllocationStats final {
+    std::size_t live{0};
+    std::size_t peak{0};
+    std::size_t allocations{0};
+    std::size_t fail_at{0};
+    std::array<std::size_t, 4> stage_live{};
+};
+
+JsonAllocationStats* active_json_stats = nullptr;
+
+struct alignas(std::max_align_t) JsonAllocationHeader final {
+    std::size_t size;
+};
+
+void* CJSON_CDECL trackedJsonMalloc(const std::size_t size) noexcept {
+    auto& stats = *active_json_stats;
+    ++stats.allocations;
+    if (stats.allocations == stats.fail_at)
+        return nullptr;
+    auto* const block =
+        static_cast<JsonAllocationHeader*>(std::malloc(sizeof(JsonAllocationHeader) + size));
+    if (block == nullptr)
+        return nullptr;
+    block->size = size;
+    stats.live += size;
+    if (stats.live > stats.peak)
+        stats.peak = stats.live;
+    return block + 1;
+}
+
+void CJSON_CDECL trackedJsonFree(void* pointer) noexcept {
+    if (pointer == nullptr)
+        return;
+    auto* const block = static_cast<JsonAllocationHeader*>(pointer) - 1;
+    active_json_stats->live -= block->size;
+    std::free(block);
+}
+
+void noteJsonStage(const mqtt_discovery::Stage stage, void* const context) noexcept {
+    auto& stats = *static_cast<JsonAllocationStats*>(context);
+    stats.stage_live[static_cast<std::size_t>(stage)] = stats.live;
+}
+
+void testFullDiscoveryPayload() noexcept {
+    constexpr char device_id[] = "sterownik_led_001122334455";
+    DiscoveryFixture fixture("sterownik-led");
+    std::array<char, mqtt_discovery::kPayloadCapacity> payload{};
+    JsonAllocationStats stats{};
+    active_json_stats = &stats;
+    cJSON_Hooks hooks{};
+    hooks.malloc_fn = trackedJsonMalloc;
+    hooks.free_fn = trackedJsonFree;
+    cJSON_InitHooks(&hooks);
+    const auto result = mqtt_discovery::build(fixture.topics, device_id, "0.10.3", payload.data(),
+                                              payload.size(), noteJsonStage, &stats);
+    cJSON_InitHooks(nullptr);
+    active_json_stats = nullptr;
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(0U, stats.live);
+    EXPECT_EQ(0U, stats.stage_live[0]);
+    EXPECT_TRUE(stats.stage_live[1] > 0U);
+    EXPECT_EQ(stats.stage_live[1], stats.stage_live[2]);
+    EXPECT_EQ(0U, stats.stage_live[3]);
+    EXPECT_TRUE(result.bytes < payload.size());
+    std::printf(
+        "HOST_DISCOVERY bytes=%u/%u cjson_live=%u/%u/%u/%u peak=%u allocations=%u\n",
+        static_cast<unsigned>(result.bytes), static_cast<unsigned>(payload.size()),
+        static_cast<unsigned>(stats.stage_live[0]), static_cast<unsigned>(stats.stage_live[1]),
+        static_cast<unsigned>(stats.stage_live[2]), static_cast<unsigned>(stats.stage_live[3]),
+        static_cast<unsigned>(stats.peak), static_cast<unsigned>(stats.allocations));
+    if (!result.ok())
+        return;
+    cJSON* const parsed = cJSON_Parse(payload.data());
+    EXPECT_TRUE(parsed != nullptr);
+    if (parsed != nullptr) {
+        cJSON* const components = cJSON_GetObjectItemCaseSensitive(parsed, "cmps");
+        EXPECT_TRUE(components != nullptr);
+        if (components != nullptr) {
+            EXPECT_EQ(39, cJSON_GetArraySize(components));
+            constexpr std::array<const char*, 39> expected_ids{{"key_1",
+                                                                "key_2",
+                                                                "key_3",
+                                                                "key_4",
+                                                                "key_5",
+                                                                "pir_delay_1",
+                                                                "pir_delay_2",
+                                                                "lcd_mode",
+                                                                "lcd_override",
+                                                                "lcd_night",
+                                                                "pwm_4_frequency",
+                                                                "pwm_4_minimum",
+                                                                "pwm_4_on_us",
+                                                                "pwm_4_off_us",
+                                                                "pwm_4_mode",
+                                                                "pwm_5_frequency",
+                                                                "pwm_5_minimum",
+                                                                "pwm_5_on_us",
+                                                                "pwm_5_off_us",
+                                                                "pwm_5_mode",
+                                                                "debug",
+                                                                "reset_reason",
+                                                                "uptime",
+                                                                "debug_dropped",
+                                                                "channel_1",
+                                                                "channel_2",
+                                                                "channel_3",
+                                                                "channel_4",
+                                                                "channel_5",
+                                                                "pir_1",
+                                                                "pir_2",
+                                                                "ota_status",
+                                                                "ina228_current",
+                                                                "ina228_bus_voltage",
+                                                                "ina228_power",
+                                                                "ina228_energy",
+                                                                "ina228_die_temperature",
+                                                                "temperature_radiator",
+                                                                "temperature_enclosure"}};
+            for (const char* const id : expected_ids) {
+                EXPECT_TRUE(cJSON_GetObjectItemCaseSensitive(components, id) != nullptr);
+            }
+            for (cJSON* item = components->child; item != nullptr; item = item->next) {
+                cJSON* const id = cJSON_GetObjectItemCaseSensitive(item, "unique_id");
+                EXPECT_TRUE(cJSON_IsString(id));
+                EXPECT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(item, "p")));
+                EXPECT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(item, "state_topic")));
+                for (cJSON* other = item->next; other != nullptr; other = other->next) {
+                    cJSON* const other_id = cJSON_GetObjectItemCaseSensitive(other, "unique_id");
+                    if (cJSON_IsString(id) && cJSON_IsString(other_id))
+                        EXPECT_TRUE(std::strcmp(id->valuestring, other_id->valuestring) != 0);
+                }
+            }
+            for (std::size_t i = 0; i < fixture.command.size(); ++i) {
+                std::array<char, 24> component_id{};
+                std::snprintf(component_id.data(), component_id.size(), "channel_%u",
+                              static_cast<unsigned>(i + 1U));
+                cJSON* const channel =
+                    cJSON_GetObjectItemCaseSensitive(components, component_id.data());
+                EXPECT_TRUE(channel != nullptr);
+                if (channel != nullptr) {
+                    const cJSON* const command =
+                        cJSON_GetObjectItemCaseSensitive(channel, "command_topic");
+                    const cJSON* const state =
+                        cJSON_GetObjectItemCaseSensitive(channel, "state_topic");
+                    EXPECT_TRUE(cJSON_IsString(command) &&
+                                std::strcmp(command->valuestring, fixture.command[i].data()) == 0);
+                    EXPECT_TRUE(cJSON_IsString(state) &&
+                                std::strcmp(state->valuestring, fixture.state[i].data()) == 0);
+                }
+            }
+            EXPECT_TRUE(cJSON_GetObjectItemCaseSensitive(components, "ota_status") != nullptr);
+            EXPECT_TRUE(cJSON_GetObjectItemCaseSensitive(components, "ina228_current") != nullptr);
+            EXPECT_TRUE(cJSON_GetObjectItemCaseSensitive(components, "temperature_enclosure") !=
+                        nullptr);
+        }
+        cJSON* const availability = cJSON_GetObjectItemCaseSensitive(parsed, "availability");
+        EXPECT_EQ(1, cJSON_GetArraySize(availability));
+        const cJSON* const device = cJSON_GetObjectItemCaseSensitive(parsed, "dev");
+        EXPECT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(device, "ids")));
+        EXPECT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(device, "mf")));
+        EXPECT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(device, "sw")));
+        cJSON_Delete(parsed);
+    }
+    std::array<char, 64> short_payload{};
+    const auto short_result = mqtt_discovery::build(fixture.topics, device_id, "0.10.3",
+                                                    short_payload.data(), short_payload.size());
+    EXPECT_EQ(mqtt_discovery::Failure::buffer, short_result.failure);
+    EXPECT_EQ('\0', short_payload[0]);
+    DiscoveryFixture long_fixture(
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+    const auto long_result = mqtt_discovery::build(long_fixture.topics, device_id, "0.10.3",
+                                                   payload.data(), payload.size());
+    EXPECT_TRUE(long_result.ok());
+    std::printf("HOST_DISCOVERY max_prefix_bytes=%u/%u\n", static_cast<unsigned>(long_result.bytes),
+                static_cast<unsigned>(payload.size()));
+
+    const std::array<std::size_t, 4> failure_points{
+        {1U, 100U, stats.allocations / 2U, stats.allocations}};
+    for (std::size_t fail_at : failure_points) {
+        JsonAllocationStats failed{};
+        failed.fail_at = fail_at;
+        active_json_stats = &failed;
+        cJSON_InitHooks(&hooks);
+        const auto failed_result = mqtt_discovery::build(fixture.topics, device_id, "0.10.3",
+                                                         payload.data(), payload.size());
+        cJSON_InitHooks(nullptr);
+        active_json_stats = nullptr;
+        EXPECT_TRUE(!failed_result.ok());
+        EXPECT_EQ(0U, failed.live);
+    }
+}
+
 void testPowerFadeDoesNotPublishIntermediateLevels() noexcept {
     ChannelState state(65);
     DutyTransition fade;
@@ -1588,6 +1967,9 @@ int main() {
     testPirAutomationOverflowAndDisable();
     testLocalConfigNvramRecovery();
     testLocalControlDiscovery();
+    testMqttSyncMachine();
+    testDiscoveryJsonFragmentsAndFailures();
+    testFullDiscoveryPayload();
     testPowerFadeDoesNotPublishIntermediateLevels();
     testNecDecoderCommand();
     testNecDecoderRepeatAndInvalidTiming();

@@ -31,7 +31,8 @@ klucze; HTTPS chroni transmisje w LAN, nie fizyczny dostep do plytki.
 Panel pokazuje status Wi-Fi, MQTT, OTA, EEPROM, kanaly LED, PIR, INA228, DS18B20
 oraz ostatnie komunikaty ESP_LOG. Jedynymi komendami sa skan Wi-Fi i skan 1-Wire.
 Hasel Wi-Fi i MQTT nie da sie wpisac przez panel. Logi sa buforowane niezaleznie
-od diagnostyki MQTT; pamiec jest ograniczona do 48 wpisow po 256 znakow.
+od diagnostyki MQTT; pamiec urzadzenia jest ograniczona do 48 wpisow po 256
+znakow, a tekst logow w przegladarce do 32 768 znakow.
 Odczyt wymaga logowania; 5 blednych prob blokuje logowanie na 60 s. Sesja jest
 ulatujaca i znika po restarcie, zmianie hasla lub 30 minutach bezczynnosci.
 Nie przekierowuj portu 443 z
@@ -81,6 +82,31 @@ nie jest to blad certyfikatu. `0.10.3` ogranicza panel do jednej sesji HTTPS
 i zamyka najmniej niedawno uzywana sesje przed przyjeciem kolejnej. Log
 `HTTPS RAM` podaje wolny wewnetrzny RAM 8-bit, najwiekszy dostepny blok i
 minimum, przy pierwszym odczycie statusu i dalej najwyzej raz na minute.
+Podaje rowniez liczbe otwartych/zamknietych sesji TLS. `HTTPS after close`
+probkuje heap po zwolnieniu kontekstu TLS, najwyzej raz na minute. Brak
+narastania pamieci po zamknieciu kart nalezy potwierdzic na ESP32; sam przeglad
+kodu i test hostowy nie wystarczaja.
 Nie zmieniano globalnych buforow MbedTLS, od ktorych zalezy takze OTA GitHub.
 HIL: zostawic jedna i kilka kart panelu na co najmniej 30 min, sprawdzic
 logi RAM, bledy TLS, dostep do statusu i dzialanie lokalnych przyciskow.
+
+## Robocza diagnostyka MQTT/Discovery po 0.10.3
+
+Panel i `mqtt status` rozdzielaja stan transportu, retained birth, 28 potwierdzonych
+subskrypcji, Discovery zakolejkowane i PUBACK. `PUBACK` potwierdza przyjecie
+publikacji QoS1 przez broker, nie przetworzenie konfiguracji przez HA. `Outbox`
+to rzeczywisty odczyt bufora ESP-MQTT; `Zalegle publikacje` to osobna flaga
+nieudanego kolejkowania. `Blad sync` wskazuje ostatni etap awarii.
+
+Przy pierwszej budowie Discovery log podaje rozmiar JSON, wolny wewnetrzny RAM
+i najwiekszy blok przed/budowa/po, historyczne minimum RAM oraz minimum stosu
+zadania MQTT. `failed_alloc_during_build` jest globalnym sygnalem alokatora
+w oknie budowy: moze dotyczyc rownolegle innego zadania, wiec nie przesadza
+samodzielnie o winie cJSON. Po udanej budowie kolejny reconnect i birth HA
+uzywaja gotowego bufora; po `mqtt apply` JSON powstaje od nowa. Dodatkowy log
+po enqueue pokazuje koszt skopiowania duzego retained PUBLISH do outboxu.
+
+W tym obrazie nie przeprowadzono jeszcze HIL 30-60 min z 0/1/kilkoma kartami
+HTTPS. Pierwsza budowa cJSON nadal wymaga pomiaru przed doborem sposobu
+zmniejszenia jej szczytowej alokacji. Nie zmieniono globalnych buforow MbedTLS,
+HTTPS ani OTA.

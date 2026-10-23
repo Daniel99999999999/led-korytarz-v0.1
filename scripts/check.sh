@@ -110,8 +110,8 @@ if grep -Eq 'ledc_' src/MqttService.cpp src/MqttService.hpp; then
     exit 1
 fi
 
-if grep -q 'root.get(), "availability_topic"' src/MqttService.cpp || \
-    ! grep -q 'addAvailabilityList(root.get(), device_availability)' src/MqttService.cpp; then
+if grep -q 'root.get(), "availability_topic"' src/MqttDiscoveryPayload.cpp || \
+    ! grep -q 'addAvailabilityList(root.get(), device_availability)' src/MqttDiscoveryPayload.cpp; then
     echo "ERROR: Root MQTT discovery ma uzywac listy availability, aby sensory INA228 mogly ja bezpiecznie nadpisac." >&2
     exit 1
 fi

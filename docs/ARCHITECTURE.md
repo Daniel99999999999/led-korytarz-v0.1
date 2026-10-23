@@ -24,8 +24,8 @@ NVRAM jest oddzielona od `SettingsService` i payloadu EEPROM-u. Dwa rekordy CRC/
 przechowują wyłącznie pięć masek KEY, dwa czasy PIR, tryb LCD i czas przycisku. Stany świateł i jasność pozostają w RAM.
 Nie dodano mutexów blokujących kontroler ani operacji I2C w jego zadaniu.
 
-MQTT publikuje różnicowo 27 pól migawki (zależnie od włączonych funkcji), z pełną
-synchronizacją po reconnect/birth HA. Konfiguracja ma dziesięć nowych pól trackera.
+MQTT publikuje różnicowo 37 pól trackera (zależnie od włączonych funkcji), z pełną
+migawką po reconnect/birth HA. Konfiguracja PWM zajmuje dziesięć pól trackera.
 PWM podczas ON/OFF nie generuje dodatkowych wartości jasności w MQTT; LCD odróżnia
 przejście ON/OFF od regulacji jasności.
 
@@ -33,7 +33,7 @@ Szczegóły priorytetów, NVRAM, tematów MQTT i testów: [LOCAL_CONTROL.md](LOC
 
 BacklightPolicy działa w kontrolerze; żądany stan podświetlenia przekazuje atomowo do LcdService.
 LcdDisplay sprawdza jeden znak DDRAM co 125 ms i korzysta z istniejącego recovery po błędzie.
-Bufor discovery ma 16 KiB, limit outboxu 32 KiB (limit, nie stała alokacja).
+Bufor discovery ma 24 576 B, limit outboxu 32 KiB (limit, nie stała alokacja).
 Szczegóły: [LCD_CONTROL.md](LCD_CONTROL.md).
 
 ## Debug MQTT v0.8.1
@@ -54,6 +54,29 @@ stan startu i retry przed clear/disconnect/apply. Stop klienta, który jeszcze n
 pomija esp_mqtt_client_stop i niszczy uchwyt. Udany start nie jest powtarzany na GOT_IP;
 ponowne połączenia obsługuje ESP-MQTT. Zanik sieci może nastąpić także po sprawdzeniu
 znacznika; zwykła obsługa błędów transportu pozostaje aktywna.
+
+## Synchronizacja MQTT po diagnozie 0.10.3
+
+`connected` oznacza transport MQTT, nie gotowosc encji HA. Zadanie MQTT po CONNECT
+publikuje retained `online`, wysyla pojedyncze SUBSCRIBE i czeka na SUBACK przed
+nastepnym tematem (28 tematow). Brak SUBACK albo odmowa ponawia tylko ten temat
+z backoff 2-30 s. Birth HA nie subskrybuje ponownie, lecz odnawia availability,
+Discovery i pelna migawke. Retained stany/telemetria oraz status OTA ida niezaleznie
+od kosztownej budowy Discovery. Blad budowy/enqueue Discovery ma osobny backoff
+5-60 s i nie uniewaznia trackera w kazdej probie. Po poprawnej budowie JSON jest
+buforowany do nastepnego `apply`; reconnect/birth nie tworza ponownie drzewa cJSON.
+Nowy `MqttDiscoveryPayload` jest wspolny dla firmware i testu hostowego 39 encji.
+Cache uniewazniaja `apply` i `clear`. Budowa loguje wewnetrzny heap przed
+drzewem, po drzewie, po serializacji i po zwolnieniu drzewa. Hostowy szczyt
+51 998 B zadanych bajtow cJSON nie jest pomiarem ESP32. Brak PUBACK przez
+35 s uruchamia diagnostyke i ponowienie z backoff, przy pustym/malym outboxie;
+ESP-MQTT ponawia QoS1 w tym czasie.
+
+Diagnostyka rozroznia `subscriptions_ready` (SUBACK), `discovery_queued` (QoS1
+enqueue) i `discovery_confirmed` (PUBACK brokera, nie potwierdzenie przetworzenia
+przez HA). Outbox to odczyt `esp_mqtt_client_get_outbox_size`, a nie flaga zaleglych
+publikacji. Pierwsza budowa nadal tworzy drzewo cJSON; jej szczytowy koszt RAM
+jest przedmiotem pomiaru HIL, nie zostal uznany za znana przyczyne awarii.
 
 ## v0.9.0 — PWM4/5 i lokalne OTA
 

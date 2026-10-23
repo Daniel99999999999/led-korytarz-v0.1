@@ -1,14 +1,13 @@
 #include "MqttService.hpp"
 
-#include "DebugDiscovery.hpp"
 #include "DebugLog.hpp"
 #include "DeviceIdentity.hpp"
 #include "LedController.hpp"
-#include "LocalControlDiscovery.hpp"
 #include "MqttCommandParser.hpp"
+#include "MqttDiscoveryPayload.hpp"
 #include "WifiService.hpp"
-#include "cJSON.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 
@@ -33,9 +32,22 @@ static_assert(MqttService::kMaxDiscoveryPrefixLength ==
 #endif
 constexpr char kOnline[] = "online";
 constexpr char kOffline[] = "offline";
+constexpr std::uint32_t kInternalHeapCaps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+std::atomic<bool> discovery_build_active{false};
+std::atomic<std::size_t> discovery_failed_allocation_bytes{0};
+
+void failedAllocationHook(const std::size_t size, const std::uint32_t caps,
+                          const char* const function_name) noexcept {
+    static_cast<void>(caps);
+    static_cast<void>(function_name);
+    if (discovery_build_active.load(std::memory_order_relaxed)) {
+        discovery_failed_allocation_bytes.store(size, std::memory_order_relaxed);
+    }
+}
 
 static_assert(device_identity::kHomeAssistantChannelNames.size() == MqttService::kChannelCount);
 static_assert(device_identity::kHomeAssistantPirInputNames.size() == MqttService::kPirInputCount);
+static_assert(MqttSyncMachine::kSubscriptionCount == 1 + 10 + 5 + 5 + 2 + 3 + 1 + 1);
 static_assert(std::is_trivially_copyable_v<MqttService::Snapshot>,
               "Migawka MQTT musi nadawac sie do kopiowania przez kolejke FreeRTOS");
 
@@ -64,57 +76,31 @@ class MutexGuard final {
     bool locked_{false};
 };
 
-class JsonOwner final {
-  public:
-    explicit JsonOwner(cJSON* const value) noexcept : value_(value) {}
-    ~JsonOwner() {
-        cJSON_Delete(value_);
-    }
-
-    JsonOwner(const JsonOwner&) = delete;
-    JsonOwner& operator=(const JsonOwner&) = delete;
-
-    [[nodiscard]] cJSON* get() const noexcept {
-        return value_;
-    }
-
-  private:
-    cJSON* value_;
+struct HeapSample final {
+    std::size_t free_bytes{0};
+    std::size_t largest_block{0};
+    std::size_t minimum_free{0};
+    bool observed{false};
 };
 
-[[nodiscard]] bool addString(cJSON* const object, const char* const name,
-                             const char* const value) noexcept {
-    return cJSON_AddStringToObject(object, name, value) != nullptr;
+using DiscoveryHeapSamples = std::array<HeapSample, 4>;
+
+void sampleDiscoveryHeap(const mqtt_discovery::Stage stage, void* const context) noexcept {
+    auto& samples = *static_cast<DiscoveryHeapSamples*>(context);
+    auto& sample = samples[static_cast<std::size_t>(stage)];
+    sample.free_bytes = heap_caps_get_free_size(kInternalHeapCaps);
+    sample.largest_block = heap_caps_get_largest_free_block(kInternalHeapCaps);
+    sample.minimum_free = heap_caps_get_minimum_free_size(kInternalHeapCaps);
+    sample.observed = true;
 }
 
-[[nodiscard]] bool addNumber(cJSON* const object, const char* const name,
-                             const double value) noexcept {
-    return cJSON_AddNumberToObject(object, name, value) != nullptr;
-}
-
-[[nodiscard]] bool addBool(cJSON* const object, const char* const name, const bool value) noexcept {
-    return cJSON_AddBoolToObject(object, name, value) != nullptr;
-}
-
-template <std::size_t TopicCount>
-[[nodiscard]] bool addAvailabilityList(cJSON* const object,
-                                       const std::array<const char*, TopicCount>& topics,
-                                       const char* const mode = nullptr) noexcept {
-    cJSON* const availability = cJSON_AddArrayToObject(object, "availability");
-    if (availability == nullptr) {
-        return false;
+void logDiscoveryHeap(const char* const stage, const HeapSample& sample) noexcept {
+    if (sample.observed) {
+        ESP_LOGI(kTag, "Discovery RAM %s: free=%u B, largest=%u B, minimum=%u B", stage,
+                 static_cast<unsigned>(sample.free_bytes),
+                 static_cast<unsigned>(sample.largest_block),
+                 static_cast<unsigned>(sample.minimum_free));
     }
-    for (const char* const topic : topics) {
-        cJSON* const entry = cJSON_CreateObject();
-        if (entry == nullptr) {
-            return false;
-        }
-        cJSON_AddItemToArray(availability, entry);
-        if (!addString(entry, "topic", topic)) {
-            return false;
-        }
-    }
-    return (mode == nullptr) || addString(object, "availability_mode", mode);
 }
 
 [[nodiscard]] bool formatDeviceId(char* const destination, const std::size_t destination_size,
@@ -133,6 +119,36 @@ MqttService::MqttService(LedController& controller, OtaService& ota_service,
                          WifiService& wifi_service) noexcept
     : wifi_service_(wifi_service), controller_(controller), ota_service_(ota_service) {}
 
+const char* MqttService::syncErrorName(const SyncError error) noexcept {
+    switch (error) {
+    case SyncError::none:
+        return "none";
+    case SyncError::subscribe_send:
+        return "subscribe_send";
+    case SyncError::subscribe_rejected:
+        return "subscribe_rejected";
+    case SyncError::subscribe_timeout:
+        return "subscribe_timeout";
+    case SyncError::discovery_puback_timeout:
+        return "discovery_puback_timeout";
+    case SyncError::birth_enqueue:
+        return "birth_enqueue";
+    case SyncError::discovery_root:
+        return "discovery_root";
+    case SyncError::discovery_local:
+        return "discovery_local";
+    case SyncError::discovery_debug:
+        return "discovery_debug";
+    case SyncError::discovery_component:
+        return "discovery_component";
+    case SyncError::discovery_buffer:
+        return "discovery_buffer";
+    case SyncError::discovery_enqueue:
+        return "discovery_enqueue";
+    }
+    return "unknown";
+}
+
 esp_err_t MqttService::initialize() noexcept {
     if (initialized_) {
         return ESP_ERR_INVALID_STATE;
@@ -144,6 +160,10 @@ esp_err_t MqttService::initialize() noexcept {
                                          &snapshot_queue_storage_);
     if ((mutex_ == nullptr) || (client_mutex_ == nullptr) || (snapshot_queue_ == nullptr)) {
         return ESP_ERR_NO_MEM;
+    }
+    const esp_err_t hook_result = heap_caps_register_failed_alloc_callback(failedAllocationHook);
+    if (hook_result != ESP_OK) {
+        ESP_LOGW(kTag, "Diagnostyka nieudanych alokacji: %s", esp_err_to_name(hook_result));
     }
 
     std::array<std::uint8_t, 6> mac{};
@@ -325,8 +345,13 @@ esp_err_t MqttService::apply() noexcept {
         }
         secureZero(applied_config_.password.data(), applied_config_.password.size());
         applied_config_ = requested;
+        discovery_payload_valid_ = false;
+        discovery_payload_bytes_ = 0;
+        status_.discovery_payload_bytes = 0;
+        status_.configuration_applied = false;
         if (!buildTopics(applied_config_)) {
             secureZero(&requested, sizeof(requested));
+            updateStatusFromConfigurationLocked();
             return ESP_ERR_INVALID_SIZE;
         }
         status_.configuration_applied = true;
@@ -379,6 +404,9 @@ esp_err_t MqttService::clear() noexcept {
     secureZero(&staged_config_, sizeof(staged_config_));
     secureZero(&applied_config_, sizeof(applied_config_));
     topics_ = {};
+    discovery_payload_valid_ = false;
+    discovery_payload_bytes_ = 0;
+    status_.discovery_payload_bytes = 0;
     copyText(staged_config_.topic_prefix.data(), staged_config_.topic_prefix.size(),
              device_identity::kTechnicalSlug, kMaxTopicPrefixLength);
     copyText(staged_config_.discovery_prefix.data(), staged_config_.discovery_prefix.size(),
@@ -497,92 +525,57 @@ void MqttService::taskEntry(void* const context) noexcept {
 [[noreturn]] void MqttService::taskLoop() noexcept {
     DebugLog::instance().excludePublisherTask(xTaskGetCurrentTaskHandle());
     TickType_t last_state_publish = 0;
-    TickType_t retry_started = 0;
-    TickType_t retry_delay = 0;
-    bool retry_pending = false;
-    bool synchronization_pending = false;
+    TickType_t last_ota_attempt = 0;
+    bool ota_retry_pending = false;
+    std::uint32_t observed_generation = 0;
     for (;;) {
-        TickType_t wait_time = portMAX_DELAY;
-        if (!retry_pending && synchronization_requested_.load(std::memory_order_acquire)) {
-            wait_time = 0;
-        } else if (retry_pending) {
-            const TickType_t elapsed = xTaskGetTickCount() - retry_started;
-            wait_time = (elapsed >= retry_delay) ? 0 : (retry_delay - elapsed);
-        }
-        static_cast<void>(ulTaskNotifyTake(pdTRUE, std::min(wait_time, pdMS_TO_TICKS(200))));
+        static_cast<void>(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200)));
         startClientWhenNetworkReady();
-        DebugLog::Status debug_status{};
-        static_cast<void>(DebugLog::instance().status(debug_status));
         if (!connected_.load(std::memory_order_acquire)) {
-            retry_pending = false;
-            synchronization_pending = false;
             continue;
         }
 
-        if (synchronization_requested_.exchange(false, std::memory_order_acq_rel)) {
-            synchronization_pending = true;
-        }
-
-        if (retry_pending) {
-            const TickType_t elapsed = xTaskGetTickCount() - retry_started;
-            if (elapsed < retry_delay) {
-                continue;
-            }
-            retry_pending = false;
-        }
-
-        if (synchronization_pending) {
+        const std::uint32_t generation = connection_generation_.load(std::memory_order_acquire);
+        if (generation != observed_generation) {
+            observed_generation = generation;
+            sync_machine_.onConnected();
             publish_tracker_.invalidateAll();
             ota_status_published_ = false;
             debug_status_published_ = false;
-            const bool synchronization_queued = synchronizeClient();
-            synchronization_pending = !synchronization_queued;
-            retry_pending = true;
-            retry_started = xTaskGetTickCount();
-            retry_delay = pdMS_TO_TICKS(synchronization_queued ? kSynchronizationSettleMs
-                                                               : kPublishRetryIntervalMs);
-            continue;
+            last_state_publish = 0;
+            ota_retry_pending = false;
+        }
+        if (synchronization_requested_.exchange(false, std::memory_order_acq_rel)) {
+            sync_machine_.onBirth();
+            discovery_message_id_.store(0, std::memory_order_release);
+            discovery_acknowledged_.store(false, std::memory_order_release);
+            publish_tracker_.invalidateAll();
+            ota_status_published_ = false;
+            debug_status_published_ = false;
+            MutexGuard lock(mutex_);
+            if (lock.locked()) {
+                status_.birth_queued = false;
+                status_.discovery_queued = false;
+                status_.discovery_confirmed = false;
+            }
         }
 
         serviceDebug();
-        bool publish_failed = !publishOtaStatus();
-        if (publish_failed) {
-            retry_pending = true;
-            retry_started = xTaskGetTickCount();
-            retry_delay = pdMS_TO_TICKS(kPublishRetryIntervalMs);
-            continue;
+        const TickType_t now = xTaskGetTickCount();
+        if (!ota_retry_pending ||
+            now - last_ota_attempt >= pdMS_TO_TICKS(kPublishRetryIntervalMs)) {
+            ota_retry_pending = !publishOtaStatus();
+            last_ota_attempt = now;
         }
 
         Snapshot snapshot{};
-        if (xQueuePeek(snapshot_queue_, &snapshot, 0) != pdPASS) {
-            continue;
+        if (xQueuePeek(snapshot_queue_, &snapshot, 0) == pdPASS &&
+            (last_state_publish == 0 ||
+             now - last_state_publish >= pdMS_TO_TICKS(kMinimumStatePublishIntervalMs))) {
+            static_cast<void>(publishSnapshot(snapshot));
+            last_state_publish = now;
         }
-
-        const TickType_t minimum_interval = pdMS_TO_TICKS(kMinimumStatePublishIntervalMs);
-        while (last_state_publish != 0U) {
-            const TickType_t elapsed = xTaskGetTickCount() - last_state_publish;
-            if (elapsed >= minimum_interval) {
-                break;
-            }
-            static_cast<void>(ulTaskNotifyTake(pdTRUE, minimum_interval - elapsed));
-            if (!connected_.load(std::memory_order_acquire)) {
-                break;
-            }
-            static_cast<void>(xQueuePeek(snapshot_queue_, &snapshot, 0));
-        }
-
-        if (synchronization_requested_.load(std::memory_order_acquire)) {
-            continue;
-        }
-        if (connected_.load(std::memory_order_acquire)) {
-            const bool snapshot_queued = publishSnapshot(snapshot);
-            last_state_publish = xTaskGetTickCount();
-            if (!snapshot_queued) {
-                retry_pending = true;
-                retry_started = last_state_publish;
-                retry_delay = pdMS_TO_TICKS(kPublishRetryIntervalMs);
-            }
-        }
+        advanceSynchronization(esp_log_timestamp());
     }
 }
 
@@ -610,6 +603,11 @@ void MqttService::handleEvent(const esp_mqtt_event_handle_t event) noexcept {
 
     switch (event->event_id) {
     case MQTT_EVENT_CONNECTED: {
+        last_suback_id_.store(0, std::memory_order_release);
+        last_puback_id_.store(0, std::memory_order_release);
+        discovery_message_id_.store(0, std::memory_order_release);
+        discovery_acknowledged_.store(false, std::memory_order_release);
+        connection_generation_.fetch_add(1, std::memory_order_acq_rel);
         connected_.store(true, std::memory_order_release);
         MutexGuard lock(mutex_);
         if (lock.locked()) {
@@ -617,20 +615,57 @@ void MqttService::handleEvent(const esp_mqtt_event_handle_t event) noexcept {
             ++status_.connect_count;
             status_.last_error_type = 0;
             status_.last_connect_return_code = 0;
+            status_.birth_queued = false;
+            status_.subscriptions_ready = false;
+            status_.subscriptions_done = 0;
+            status_.discovery_queued = false;
+            status_.discovery_confirmed = false;
+            status_.outbox_bytes = 0;
         }
         ESP_LOGI(kTag, "Polaczono z brokerem MQTT");
-        requestSynchronization();
+        if (task_handle_ != nullptr) {
+            static_cast<void>(xTaskNotifyGive(task_handle_));
+        }
         break;
     }
     case MQTT_EVENT_DISCONNECTED: {
         connected_.store(false, std::memory_order_release);
+        connection_generation_.fetch_add(1, std::memory_order_acq_rel);
         MutexGuard lock(mutex_);
-        if (lock.locked() && (status_.state != State::authentication_error)) {
-            status_.state = State::disconnected;
+        if (lock.locked()) {
+            if (status_.state != State::authentication_error) {
+                status_.state = State::disconnected;
+            }
+            status_.birth_queued = false;
+            status_.subscriptions_ready = false;
+            status_.subscriptions_done = 0;
+            status_.discovery_queued = false;
+            status_.discovery_confirmed = false;
+            status_.outbox_bytes = 0;
         }
-        ESP_LOGW(kTag, "Rozlaczono z brokerem; klient ponowi polaczenie");
+        ESP_LOGW(kTag, "Rozlaczono z brokerem; Wi-Fi ready=%s, klient ponowi polaczenie",
+                 wifi_service_.networkReady() ? "tak" : "nie");
         break;
     }
+    case MQTT_EVENT_SUBSCRIBED:
+        last_suback_accepted_.store(event->data != nullptr && event->data_len == 1 &&
+                                        static_cast<std::uint8_t>(event->data[0]) < 0x80,
+                                    std::memory_order_release);
+        last_suback_id_.store(event->msg_id, std::memory_order_release);
+        if (task_handle_ != nullptr) {
+            static_cast<void>(xTaskNotifyGive(task_handle_));
+        }
+        break;
+    case MQTT_EVENT_PUBLISHED:
+        last_puback_id_.store(event->msg_id, std::memory_order_release);
+        if (event->msg_id > 0 &&
+            event->msg_id == discovery_message_id_.load(std::memory_order_acquire)) {
+            discovery_acknowledged_.store(true, std::memory_order_release);
+            if (task_handle_ != nullptr) {
+                static_cast<void>(xTaskNotifyGive(task_handle_));
+            }
+        }
+        break;
     case MQTT_EVENT_DATA:
         handleData(*event);
         break;
@@ -841,45 +876,148 @@ void MqttService::requestSynchronization() noexcept {
     }
 }
 
-bool MqttService::synchronizeClient() noexcept {
-    MutexGuard client_lock(client_mutex_);
-    if (!client_lock.locked() || !connected_.load(std::memory_order_acquire) ||
-        (client_ == nullptr)) {
-        return false;
+const char* MqttService::subscriptionTopic(const std::size_t index) const noexcept {
+    if (index == 0) {
+        return topics_.debug_command.data();
     }
+    if (index <= 10) {
+        return topics_.pwm_command[index - 1].data();
+    }
+    if (index <= 15) {
+        return topics_.command[index - 11].data();
+    }
+    if (index <= 20) {
+        return topics_.mapping_command[index - 16].data();
+    }
+    if (index <= 22) {
+        return topics_.delay_command[index - 21].data();
+    }
+    switch (index) {
+    case 23:
+        return topics_.lcd_mode_command.data();
+    case 24:
+        return topics_.lcd_override_command.data();
+    case 25:
+        return topics_.lcd_night_command.data();
+    case 26:
+        return topics_.home_assistant_status.data();
+    case 27:
+        return topics_.ota_command.data();
+    default:
+        return nullptr;
+    }
+}
 
-    bool queued = esp_mqtt_client_subscribe(client_, topics_.debug_command.data(), 1) >= 0;
-    for (const auto& topic : topics_.pwm_command)
-        queued = (esp_mqtt_client_subscribe(client_, topic.data(), 1) >= 0) && queued;
-    for (const auto& command_topic : topics_.command) {
-        if (esp_mqtt_client_subscribe(client_, command_topic.data(), 1) < 0) {
-            ESP_LOGW(kTag, "Nie udalo sie zasubskrybowac %s", command_topic.data());
-            queued = false;
+void MqttService::advanceSynchronization(const std::uint32_t now_ms) noexcept {
+    const int suback_id = last_suback_id_.load(std::memory_order_acquire);
+    const auto suback = sync_machine_.onSuback(
+        suback_id, last_suback_accepted_.load(std::memory_order_acquire), now_ms);
+    if (suback != MqttSyncMachine::SubackResult::ignored) {
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            status_.subscriptions_done =
+                static_cast<std::uint8_t>(sync_machine_.subscriptionIndex());
+            status_.subscriptions_ready = sync_machine_.subscriptionsReady();
+            if (suback == MqttSyncMachine::SubackResult::rejected) {
+                status_.last_sync_error = SyncError::subscribe_rejected;
+            }
+        }
+        if (suback == MqttSyncMachine::SubackResult::rejected) {
+            ESP_LOGW(kTag, "SUBACK odrzucony; ponowienie z backoff (topic %u)",
+                     static_cast<unsigned>(sync_machine_.subscriptionIndex() + 1));
+        } else if (sync_machine_.subscriptionsReady()) {
+            ESP_LOGI(kTag, "Subskrypcje MQTT potwierdzone: %u/%u",
+                     static_cast<unsigned>(MqttSyncMachine::kSubscriptionCount),
+                     static_cast<unsigned>(MqttSyncMachine::kSubscriptionCount));
         }
     }
-    for (const auto& topic : topics_.mapping_command) {
-        queued = (esp_mqtt_client_subscribe(client_, topic.data(), 1) >= 0) && queued;
+    if (sync_machine_.pollSubackTimeout(now_ms)) {
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            status_.last_sync_error = SyncError::subscribe_timeout;
+        }
+        ESP_LOGW(kTag, "Brak SUBACK; ponowienie z backoff (topic %u)",
+                 static_cast<unsigned>(sync_machine_.subscriptionIndex() + 1));
     }
-    for (const auto& topic : topics_.delay_command) {
-        queued = (esp_mqtt_client_subscribe(client_, topic.data(), 1) >= 0) && queued;
+    if (discovery_acknowledged_.load(std::memory_order_acquire) &&
+        sync_machine_.confirmDiscovery(discovery_message_id_.load(std::memory_order_acquire))) {
+        {
+            MutexGuard lock(mutex_);
+            if (lock.locked()) {
+                status_.discovery_confirmed = true;
+                status_.discovery_queued = true;
+                status_.last_sync_error = SyncError::none;
+            }
+        }
+        ESP_LOGI(kTag, "Discovery potwierdzone przez broker (PUBACK)");
     }
-    for (const char* const topic :
-         {topics_.lcd_mode_command.data(), topics_.lcd_override_command.data(),
-          topics_.lcd_night_command.data()}) {
-        queued = (esp_mqtt_client_subscribe(client_, topic, 1) >= 0) && queued;
-    }
-    if (esp_mqtt_client_subscribe(client_, topics_.home_assistant_status.data(), 1) < 0) {
-        ESP_LOGW(kTag, "Nie udalo sie zasubskrybowac statusu Home Assistant");
-        queued = false;
-    }
-    if (esp_mqtt_client_subscribe(client_, topics_.ota_command.data(), 1) < 0) {
-        ESP_LOGW(kTag, "Nie udalo sie zasubskrybowac komend OTA");
-        queued = false;
+    if (sync_machine_.pollPubackTimeout(now_ms)) {
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            status_.discovery_queued = false;
+            status_.last_sync_error = SyncError::discovery_puback_timeout;
+        }
+        ESP_LOGW(kTag, "Brak PUBACK Discovery; ponowienie po backoff i zwolnieniu outboxu");
     }
 
-    queued = enqueueMessage(client_, topics_.availability.data(), kOnline, true) && queued;
-    queued = publishDiscovery(client_) && queued;
-    return queued;
+    MutexGuard client_lock(client_mutex_, 0);
+    if (!client_lock.locked() || !connected_.load(std::memory_order_acquire) ||
+        client_ == nullptr) {
+        return;
+    }
+    if (sync_machine_.canQueueBirth(now_ms)) {
+        if (enqueueMessage(client_, topics_.availability.data(), kOnline, true)) {
+            sync_machine_.birthQueued();
+            MutexGuard lock(mutex_);
+            if (lock.locked()) {
+                status_.birth_queued = true;
+            }
+        } else {
+            sync_machine_.birthFailed(now_ms);
+            MutexGuard lock(mutex_);
+            if (lock.locked()) {
+                status_.last_sync_error = SyncError::birth_enqueue;
+            }
+        }
+    } else if (sync_machine_.canSubscribe(now_ms)) {
+        const char* const topic = subscriptionTopic(sync_machine_.subscriptionIndex());
+        const int id = topic == nullptr ? -1 : esp_mqtt_client_subscribe(client_, topic, 1);
+        if (id > 0) {
+            sync_machine_.subscribeSent(id, now_ms);
+        } else {
+            sync_machine_.subscribeFailed(now_ms);
+            MutexGuard lock(mutex_);
+            if (lock.locked()) {
+                status_.last_sync_error = SyncError::subscribe_send;
+            }
+            ESP_LOGW(kTag, "SUBSCRIBE nieudany; ponowienie z backoff (topic %u)",
+                     static_cast<unsigned>(sync_machine_.subscriptionIndex() + 1));
+        }
+    } else if (sync_machine_.canQueueDiscovery(now_ms) &&
+               esp_mqtt_client_get_outbox_size(client_) <= static_cast<int>(kMqttBufferLength)) {
+        last_puback_id_.store(0, std::memory_order_release);
+        discovery_acknowledged_.store(false, std::memory_order_release);
+        const int id = publishDiscovery(client_);
+        if (id > 0) {
+            sync_machine_.discoveryQueued(id, now_ms);
+            discovery_message_id_.store(id, std::memory_order_release);
+            if (last_puback_id_.load(std::memory_order_acquire) == id) {
+                discovery_acknowledged_.store(true, std::memory_order_release);
+            }
+            MutexGuard lock(mutex_);
+            if (lock.locked()) {
+                status_.discovery_queued = true;
+                status_.discovery_confirmed = false;
+            }
+        } else {
+            sync_machine_.discoveryFailed(now_ms);
+        }
+    }
+    const int outbox_bytes = esp_mqtt_client_get_outbox_size(client_);
+    MutexGuard lock(mutex_);
+    if (lock.locked()) {
+        status_.outbox_bytes = outbox_bytes > 0 ? static_cast<std::uint32_t>(outbox_bytes) : 0;
+    }
 }
 
 bool MqttService::publishSnapshot(const Snapshot& snapshot) noexcept {
@@ -1106,14 +1244,55 @@ bool MqttService::publishOtaStatus() noexcept {
     return true;
 }
 
-bool MqttService::publishDiscovery(const esp_mqtt_client_handle_t client) noexcept {
-    if (!buildDiscoveryPayload()) {
-        ESP_LOGE(kTag, "Nie udalo sie zbudowac payloadu Home Assistant Discovery");
-        return false;
+int MqttService::publishDiscovery(const esp_mqtt_client_handle_t client) noexcept {
+    if (!discovery_payload_valid_) {
+        DiscoveryHeapSamples heap_samples{};
+        discovery_failed_allocation_bytes.store(0, std::memory_order_relaxed);
+        discovery_build_active.store(true, std::memory_order_release);
+        SyncError failure = SyncError::none;
+        const bool built = buildDiscoveryPayload(failure, sampleDiscoveryHeap, &heap_samples);
+        discovery_build_active.store(false, std::memory_order_release);
+        logDiscoveryHeap("before_tree", heap_samples[0]);
+        logDiscoveryHeap("after_tree", heap_samples[1]);
+        logDiscoveryHeap("after_serialization", heap_samples[2]);
+        logDiscoveryHeap("after_free", heap_samples[3]);
+        ESP_LOGI(kTag,
+                 "Discovery build: %s, stage=%s, JSON=%u/%u B, "
+                 "failed_alloc_during_build=%u B, task stack minimum=%u",
+                 built ? "OK" : "FAIL", syncErrorName(failure),
+                 static_cast<unsigned>(discovery_payload_bytes_),
+                 static_cast<unsigned>(discovery_payload_.size()),
+                 static_cast<unsigned>(
+                     discovery_failed_allocation_bytes.load(std::memory_order_relaxed)),
+                 static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+        if (!built) {
+            MutexGuard lock(mutex_);
+            if (lock.locked()) {
+                status_.last_sync_error = failure;
+                status_.discovery_payload_bytes = 0;
+            }
+            return -1;
+        }
+        discovery_payload_valid_ = true;
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            status_.discovery_payload_bytes = static_cast<std::uint32_t>(discovery_payload_bytes_);
+        }
     }
-    const bool queued =
-        enqueueMessage(client, topics_.discovery.data(), discovery_payload_.data(), true);
-    if (queued) {
+    const std::size_t free_before_enqueue = heap_caps_get_free_size(kInternalHeapCaps);
+    const std::size_t largest_before_enqueue = heap_caps_get_largest_free_block(kInternalHeapCaps);
+    const int id =
+        enqueueMessageId(client, topics_.discovery.data(), discovery_payload_.data(), true);
+    ESP_LOGI(kTag,
+             "Discovery enqueue: %s, JSON=%u B, heap free=%u->%u, largest=%u->%u, "
+             "outbox=%d B",
+             id > 0 ? "OK" : "FAIL", static_cast<unsigned>(discovery_payload_bytes_),
+             static_cast<unsigned>(free_before_enqueue),
+             static_cast<unsigned>(heap_caps_get_free_size(kInternalHeapCaps)),
+             static_cast<unsigned>(largest_before_enqueue),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(kInternalHeapCaps)),
+             esp_mqtt_client_get_outbox_size(client));
+    if (id > 0) {
         unsigned sensor_count = 0U;
 #if LED_CONTROLLER_INA228_ENABLED
         sensor_count += 5U;
@@ -1121,16 +1300,26 @@ bool MqttService::publishDiscovery(const esp_mqtt_client_handle_t client) noexce
 #if LED_CONTROLLER_DS18B20_ENABLED
         sensor_count += 2U;
 #endif
-        ESP_LOGI(kTag, "Home Assistant Discovery: 5 kanalow LED + 2 wejscia PIR + %u pomiarow",
-                 sensor_count);
+        ESP_LOGI(kTag, "Home Assistant Discovery: %u encji (5 LED, 2 PIR, %u pomiarow)",
+                 32U + sensor_count, sensor_count);
+    } else {
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            status_.last_sync_error = SyncError::discovery_enqueue;
+        }
     }
-    return queued;
+    return id;
 }
 
 bool MqttService::enqueueMessage(const esp_mqtt_client_handle_t client, const char* const topic,
                                  const char* const payload, const bool retain) noexcept {
+    return enqueueMessageId(client, topic, payload, retain) > 0;
+}
+
+int MqttService::enqueueMessageId(const esp_mqtt_client_handle_t client, const char* const topic,
+                                  const char* const payload, const bool retain) noexcept {
     if ((client == nullptr) || (topic == nullptr) || (payload == nullptr)) {
-        return false;
+        return -1;
     }
     const int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 1, retain, true);
     if (message_id < 0) {
@@ -1144,9 +1333,9 @@ bool MqttService::enqueueMessage(const esp_mqtt_client_handle_t client, const ch
             }
             enqueue_error_reported_ = true;
         }
-        return false;
+        return message_id;
     }
-    return true;
+    return message_id;
 }
 
 esp_err_t MqttService::stopClient(const bool publish_offline) noexcept {
@@ -1164,9 +1353,27 @@ esp_err_t MqttService::stopClient(const bool publish_offline) noexcept {
             esp_mqtt_client_publish(client_, topics_.availability.data(), kOffline, 0, 1, true));
     }
 
+    ESP_LOGI(kTag, "MQTT explicit stop/destroy; publish_offline=%s",
+             publish_offline ? "tak" : "nie");
     esp_mqtt_client_handle_t old_client = client_;
     active_client_.store(nullptr, std::memory_order_release);
     connected_.store(false, std::memory_order_release);
+    connection_generation_.fetch_add(1, std::memory_order_acq_rel);
+    synchronization_requested_.store(false, std::memory_order_release);
+    discovery_message_id_.store(0, std::memory_order_release);
+    discovery_acknowledged_.store(false, std::memory_order_release);
+    publish_backlog_.store(false, std::memory_order_release);
+    {
+        MutexGuard lock(mutex_);
+        if (lock.locked()) {
+            status_.birth_queued = false;
+            status_.subscriptions_ready = false;
+            status_.subscriptions_done = 0;
+            status_.discovery_queued = false;
+            status_.discovery_confirmed = false;
+            status_.outbox_bytes = 0;
+        }
+    }
     client_ = nullptr;
 
     esp_err_t result = client_started_ ? esp_mqtt_client_stop(old_client) : ESP_OK;
@@ -1400,220 +1607,57 @@ bool MqttService::buildTopics(const RuntimeConfig& config) noexcept {
     return true;
 }
 
-bool MqttService::buildDiscoveryPayload() noexcept {
-    discovery_payload_.fill('\0');
-    JsonOwner root(cJSON_CreateObject());
-    if (root.get() == nullptr) {
-        return false;
-    }
-
-    cJSON* const device = cJSON_AddObjectToObject(root.get(), "dev");
-    cJSON* const origin = cJSON_AddObjectToObject(root.get(), "o");
-    cJSON* const components = cJSON_AddObjectToObject(root.get(), "cmps");
-    if ((device == nullptr) || (origin == nullptr) || (components == nullptr)) {
-        return false;
-    }
-
-    if (!local_control::appendDiscovery(components, topics_.base.data(), device_id_.data()) ||
-        !debug_discovery::append(components, topics_.base.data(), device_id_.data())) {
-        return false;
-    }
-
-    const char* const version = esp_app_get_description()->version;
-    const std::array<const char*, 1> device_availability{{topics_.availability.data()}};
-    if (!addString(device, "ids", device_id_.data()) ||
-        !addString(device, "name", device_identity::kDisplayName) ||
-        !addString(device, "mf", device_identity::kManufacturer) ||
-        !addString(device, "mdl", device_identity::kModel) || !addString(device, "sw", version) ||
-        !addString(device, "sn", device_id_.data()) ||
-        !addString(origin, "name", device_identity::kFirmwareOrigin) ||
-        !addString(origin, "sw", version) ||
-        !addAvailabilityList(root.get(), device_availability) ||
-        !addString(root.get(), "payload_available", kOnline) ||
-        !addString(root.get(), "payload_not_available", kOffline) ||
-        !addNumber(root.get(), "qos", 1)) {
-        return false;
-    }
-
+bool MqttService::buildDiscoveryPayload(SyncError& failure, mqtt_discovery::StageObserver observer,
+                                        void* observer_context) noexcept {
+    mqtt_discovery::Topics topics{};
+    topics.base = topics_.base.data();
+    topics.availability = topics_.availability.data();
+    topics.ota_status = topics_.ota_status.data();
     for (std::size_t index = 0; index < kChannelCount; ++index) {
-        std::array<char, 24> component_id{};
-        std::array<char, 48> unique_id{};
-        const unsigned channel = static_cast<unsigned>(index + 1U);
-        if ((std::snprintf(component_id.data(), component_id.size(), "channel_%u", channel) < 0) ||
-            (std::snprintf(unique_id.data(), unique_id.size(), "%s_ch%u", device_id_.data(),
-                           channel) < 0)) {
-            return false;
-        }
-
-        cJSON* const component = cJSON_AddObjectToObject(components, component_id.data());
-        if (component == nullptr) {
-            return false;
-        }
-        cJSON* const color_modes = cJSON_AddArrayToObject(component, "supported_color_modes");
-        cJSON* const brightness_mode = cJSON_CreateString("brightness");
-        if ((color_modes == nullptr) || (brightness_mode == nullptr)) {
-            cJSON_Delete(brightness_mode);
-            return false;
-        }
-        cJSON_AddItemToArray(color_modes, brightness_mode);
-
-        if (!addString(component, "p", "light") ||
-            !addString(component, "name", device_identity::kHomeAssistantChannelNames[index]) ||
-            !addString(component, "unique_id", unique_id.data()) ||
-            !addString(component, "command_topic", topics_.command[index].data()) ||
-            !addString(component, "state_topic", topics_.state[index].data()) ||
-            !addString(component, "schema", "json") ||
-            !addNumber(component, "brightness_scale", 255) ||
-            !addBool(component, "transition", true) || !addBool(component, "flash", false) ||
-            !addString(component, "icon", "mdi:lightbulb")) {
-            return false;
-        }
+        topics.command[index] = topics_.command[index].data();
+        topics.state[index] = topics_.state[index].data();
     }
-
     for (std::size_t index = 0; index < kPirInputCount; ++index) {
-        std::array<char, 24> component_id{};
-        std::array<char, 48> unique_id{};
-        const unsigned input = static_cast<unsigned>(index + 1U);
-        if ((std::snprintf(component_id.data(), component_id.size(), "pir_%u", input) < 0) ||
-            (std::snprintf(unique_id.data(), unique_id.size(), "%s_pir%u", device_id_.data(),
-                           input) < 0)) {
-            return false;
-        }
-
-        cJSON* const component = cJSON_AddObjectToObject(components, component_id.data());
-        if (component == nullptr) {
-            return false;
-        }
-        if (!addString(component, "p", "binary_sensor") ||
-            !addString(component, "name", device_identity::kHomeAssistantPirInputNames[index]) ||
-            !addString(component, "unique_id", unique_id.data()) ||
-            !addString(component, "state_topic", topics_.pir_state[index].data()) ||
-            !addString(component, "payload_on", "ON") ||
-            !addString(component, "payload_off", "OFF") ||
-            !addString(component, "device_class", "motion")) {
-            return false;
-        }
+        topics.pir_state[index] = topics_.pir_state[index].data();
     }
-
-    std::array<char, 64> ota_unique_id{};
-    const int ota_unique_id_written = std::snprintf(ota_unique_id.data(), ota_unique_id.size(),
-                                                    "%s_ota_status", device_id_.data());
-    if ((ota_unique_id_written < 0) ||
-        (static_cast<std::size_t>(ota_unique_id_written) >= ota_unique_id.size())) {
-        return false;
-    }
-    cJSON* const ota_component = cJSON_AddObjectToObject(components, "ota_status");
-    if ((ota_component == nullptr) || !addString(ota_component, "p", "sensor") ||
-        !addString(ota_component, "name", device_identity::kHomeAssistantOtaStatusName) ||
-        !addString(ota_component, "unique_id", ota_unique_id.data()) ||
-        !addString(ota_component, "state_topic", topics_.ota_status.data()) ||
-        !addString(ota_component, "value_template", "{{ value_json.state }}") ||
-        !addString(ota_component, "json_attributes_topic", topics_.ota_status.data()) ||
-        !addString(ota_component, "entity_category", "diagnostic") ||
-        !addString(ota_component, "icon", "mdi:update")) {
-        return false;
-    }
-
 #if LED_CONTROLLER_INA228_ENABLED
-    struct SensorDefinition final {
-        const char* component_id;
-        const char* unique_suffix;
-        const char* name;
-        const char* state_topic;
-        const char* device_class;
-        const char* unit;
-        const char* state_class;
-        const char* icon;
-    };
-    const std::array<SensorDefinition, 5> ina_sensors{{
-        {"ina228_current", "ina_current", device_identity::kHomeAssistantIna228SensorNames[0],
-         topics_.ina228_current.data(), "current", "mA", "measurement", "mdi:current-dc"},
-        {"ina228_bus_voltage", "ina_voltage", device_identity::kHomeAssistantIna228SensorNames[1],
-         topics_.ina228_bus_voltage.data(), "voltage", "mV", "measurement", "mdi:flash"},
-        {"ina228_power", "ina_power", device_identity::kHomeAssistantIna228SensorNames[2],
-         topics_.ina228_power.data(), "power", "mW", "measurement", "mdi:meter-electric"},
-        {"ina228_energy", "ina_energy", device_identity::kHomeAssistantIna228SensorNames[3],
-         topics_.ina228_energy.data(), "energy", "Wh", "total_increasing", "mdi:lightning-bolt"},
-        {"ina228_die_temperature", "ina_temperature",
-         device_identity::kHomeAssistantIna228SensorNames[4], topics_.ina228_die_temperature.data(),
-         "temperature",
-         "\xC2\xB0"
-         "C",
-         "measurement", "mdi:thermometer"},
-    }};
-
-    for (const SensorDefinition& sensor : ina_sensors) {
-        std::array<char, 64> unique_id{};
-        const int written = std::snprintf(unique_id.data(), unique_id.size(), "%s_%s",
-                                          device_id_.data(), sensor.unique_suffix);
-        if ((written < 0) || (static_cast<std::size_t>(written) >= unique_id.size())) {
-            return false;
-        }
-
-        cJSON* const component = cJSON_AddObjectToObject(components, sensor.component_id);
-        if ((component == nullptr) || !addString(component, "p", "sensor") ||
-            !addString(component, "name", sensor.name) ||
-            !addString(component, "unique_id", unique_id.data()) ||
-            !addString(component, "state_topic", sensor.state_topic) ||
-            !addString(component, "device_class", sensor.device_class) ||
-            !addString(component, "unit_of_measurement", sensor.unit) ||
-            !addString(component, "state_class", sensor.state_class) ||
-            !addString(component, "icon", sensor.icon)) {
-            return false;
-        }
-        const std::array<const char*, 2> sensor_availability{
-            {topics_.availability.data(), topics_.ina228_availability.data()}};
-        if (!addAvailabilityList(component, sensor_availability, "all")) {
-            return false;
-        }
-    }
+    topics.ina228_availability = topics_.ina228_availability.data();
+    topics.ina228_state = {{topics_.ina228_current.data(), topics_.ina228_bus_voltage.data(),
+                            topics_.ina228_power.data(), topics_.ina228_energy.data(),
+                            topics_.ina228_die_temperature.data()}};
 #endif
-
 #if LED_CONTROLLER_DS18B20_ENABLED
-    struct TemperatureSensorDefinition final {
-        const char* component_id;
-        const char* unique_suffix;
-        const char* name;
-        const char* icon;
-    };
-    const std::array<TemperatureSensorDefinition, kTemperatureRoleCount> temperature_sensors{{
-        {"temperature_radiator", "temperature_radiator",
-         device_identity::kHomeAssistantTemperatureSensorNames[0], "mdi:radiator"},
-        {"temperature_enclosure", "temperature_enclosure",
-         device_identity::kHomeAssistantTemperatureSensorNames[1], "mdi:thermometer"},
-    }};
-    for (std::size_t index = 0; index < temperature_sensors.size(); ++index) {
-        const TemperatureSensorDefinition& sensor = temperature_sensors[index];
-        std::array<char, 72> unique_id{};
-        const int written = std::snprintf(unique_id.data(), unique_id.size(), "%s_%s",
-                                          device_id_.data(), sensor.unique_suffix);
-        if ((written < 0) || (static_cast<std::size_t>(written) >= unique_id.size())) {
-            return false;
-        }
-
-        cJSON* const component = cJSON_AddObjectToObject(components, sensor.component_id);
-        if ((component == nullptr) || !addString(component, "p", "sensor") ||
-            !addString(component, "name", sensor.name) ||
-            !addString(component, "unique_id", unique_id.data()) ||
-            !addString(component, "state_topic", topics_.temperature_state[index].data()) ||
-            !addString(component, "device_class", "temperature") ||
-            !addString(component, "unit_of_measurement",
-                       "\xC2\xB0"
-                       "C") ||
-            !addString(component, "state_class", "measurement") ||
-            !addString(component, "icon", sensor.icon)) {
-            return false;
-        }
-        const std::array<const char*, 2> sensor_availability{
-            {topics_.availability.data(), topics_.temperature_availability[index].data()}};
-        if (!addAvailabilityList(component, sensor_availability, "all")) {
-            return false;
-        }
+    for (std::size_t index = 0; index < kTemperatureRoleCount; ++index) {
+        topics.temperature_availability[index] = topics_.temperature_availability[index].data();
+        topics.temperature_state[index] = topics_.temperature_state[index].data();
     }
 #endif
-
-    return cJSON_PrintPreallocated(root.get(), discovery_payload_.data(),
-                                   static_cast<int>(discovery_payload_.size()), false);
+    discovery_payload_bytes_ = 0;
+    const auto result = mqtt_discovery::build(
+        topics, device_id_.data(), esp_app_get_description()->version, discovery_payload_.data(),
+        discovery_payload_.size(), observer, observer_context);
+    discovery_payload_bytes_ = result.bytes;
+    switch (result.failure) {
+    case mqtt_discovery::Failure::none:
+        failure = SyncError::none;
+        break;
+    case mqtt_discovery::Failure::root:
+        failure = SyncError::discovery_root;
+        break;
+    case mqtt_discovery::Failure::local:
+        failure = SyncError::discovery_local;
+        break;
+    case mqtt_discovery::Failure::debug:
+        failure = SyncError::discovery_debug;
+        break;
+    case mqtt_discovery::Failure::component:
+        failure = SyncError::discovery_component;
+        break;
+    case mqtt_discovery::Failure::buffer:
+        failure = SyncError::discovery_buffer;
+        break;
+    }
+    return result.ok();
 }
 
 void MqttService::updateStatusFromConfigurationLocked() noexcept {

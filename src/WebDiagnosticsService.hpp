@@ -3,6 +3,7 @@
 #include "DeviceTlsIdentity.hpp"
 #include "FeatureConfig.hpp"
 #include "esp_err.h"
+#include "esp_event.h"
 #include "esp_http_server.h"
 
 #include <array>
@@ -57,4 +58,6 @@ class WebDiagnosticsService final {
     bool session_issued_{false};
     bool initialized_{false};
     bool mdns_started_{false};
+    bool tls_event_registered_{false};
+    esp_event_handler_instance_t tls_event_instance_{nullptr};
 };

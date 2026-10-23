@@ -1,6 +1,25 @@
 # Handoff dla Codex
 
-## Aktualny stan (2026-10-08)
+## Aktualny stan (2026-10-12)
+
+Urzadzenie i publiczny Release nadal sa `0.10.3`. Lokalny kod ma robocza
+poprawke po diagnozie `docs/CODEX_MQTT_HTTPS_0.10.3_DIAGNOZA_I_ZADANIE.md`:
+28 SUBSCRIBE pojedynczo po SUBACK, oddzielny birth/Discovery z backoff,
+retained migawka niezalezna od awarii JSON, diagnostyka przyczyny/RAM/outboxu
+i PUBACK. Po udanym buildzie Discovery jest buforowane do kolejnego `apply`.
+Pelny payload 39 encji jest testowany hostowo: 16 211 B domyslnie, 20 261 B
+przy maksymalnym prefiksie (bufor 24 576 B). cJSON zadaje szczytowo 51 998 B
+w 1494 alokacjach na hoscie; **heap ESP32 nadal wymaga pomiaru**. Dodano
+cztery etapy logu heap, timeout PUBACK 35 s, licznik TLS i ograniczony widok
+logow w przegladarce. HIL 30-60 min jeszcze nie ma. `PROJECT_VER` pozostaje
+`0.10.3`, a roboczego obrazu nie publikowano, nie wysylano OTA i nie flashowano.
+`scripts/check.sh` PASS (163 pliki UTF-8, testy hostowe i build); osobny
+`pio run -e esp32doit-devkit-v1` PASS. Statyczny RAM 118 736 B, flash
+1 384 825 B. Wyniki i procedura HIL sa w
+`docs/VALIDATION_MQTT_DISCOVERY_0.10.3.md`.
+Nie oznaczac tego patcha tagiem `v0.10.3` ani `v0.10.4` przed walidacja.
+Plan i pozostale testy: `PLANS.md`, `docs/WEB_DIAGNOSTICS.md` oraz
+`docs/VALIDATION_MQTT_DISCOVERY_0.10.3.md`.
 
 Biezaca wersja zrodel i urzadzenia to `0.10.3`. `0.10.1` na urzadzeniu
 wpadla w bootloop

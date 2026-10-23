@@ -23,6 +23,7 @@ add_executable(
     "${PROJECT_ROOT}/src/LocalControlConfig.cpp"
     "${PROJECT_ROOT}/src/LocalControlDiscovery.cpp"
     "${PROJECT_ROOT}/src/DebugDiscovery.cpp"
+    "${PROJECT_ROOT}/src/MqttDiscoveryPayload.cpp"
     "${PROJECT_ROOT}/src/LocalConfigRecord.cpp"
     "${PROJECT_ROOT}/src/DutyTransition.cpp"
     "${PROJECT_ROOT}/src/IrRemoteMapper.cpp"
@@ -37,7 +38,7 @@ add_executable(
 
 target_include_directories(led_controller_host_tests PRIVATE "${PROJECT_ROOT}/src")
 target_link_libraries(led_controller_host_tests PRIVATE cjson_host)
-target_compile_definitions(led_controller_host_tests PRIVATE CONFIG_LED_CONTROLLER_AT24C08=1)
+target_compile_definitions(led_controller_host_tests PRIVATE CONFIG_LED_CONTROLLER_AT24C08=1 CONFIG_LED_CONTROLLER_INA228=1 CONFIG_LED_CONTROLLER_DS18B20=1)
 target_compile_features(led_controller_host_tests PRIVATE cxx_std_17)
 set_target_properties(led_controller_host_tests PROPERTIES CXX_EXTENSIONS OFF)
 

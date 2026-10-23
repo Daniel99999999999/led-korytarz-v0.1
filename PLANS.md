@@ -1,5 +1,44 @@
 # Execution Plans
 
+## 2026-10-12 - Walidacja RAM Discovery 0.10.3 (bez wydania)
+
+- [x] Odczytano kontrakty i uruchomiono bazowy `scripts/check.sh` (PASS).
+- [x] Testowalny na hoscie pelny builder 39 encji: JSON, rozmiar i awarie.
+- [x] Instrumentacja 4 etapow heap; audyt cache i test PUBACK timeout/reconnect.
+- [x] Audyt zamykania sesji HTTPS i pollingu logow, raport z procedura HIL.
+- [x] Koncowy `scripts/check.sh` i osobny build ESP32, bez publikacji/OTA.
+- [ ] HIL: realny heap ESP32, 30-60 min pollingu TLS, broker/session takeover.
+
+Pomiary hostowe nie sa pomiarami RAM ESP32. Wersja pozostaje 0.10.3;
+zachowac lokalne sterowanie LED/PIR/przyciskami, LCD i OTA.
+Host: JSON 16 211 B, max-prefix 20 261 B / 24 576 B; cJSON live
+0/51 998/51 998/0 B, 1494 alokacje. Mock WWW: 100 pobran, 1200 wpisow,
+widok ograniczony do 32 768 znakow. `scripts/check.sh` PASS (163 pliki UTF-8,
+testy hostowe, build); osobny `pio run -e esp32doit-devkit-v1` PASS.
+Statyczny RAM 118 736 B, flash 1 384 825 B. Bez testu sprzetowego.
+
+## 2026-10-12 - Diagnostyka i izolacja MQTT Discovery / HTTPS (kod 0.10.3)
+
+- [x] Przeczytano kontrakty i diagnoze; potwierdzono petle SUBSCRIBE po bledzie Discovery.
+- [x] Baseline: `scripts/check.sh` i osobny `pio run -e esp32doit-devkit-v1` PASS.
+- [x] Rozdzielono CONNECT/SUBACK, availability, Discovery i migawke; retry z backoff.
+- [x] Dodano instrumentacje etapow budowy, RAM/stosu/rozmiaru i nieudanych alokacji.
+- [x] Pokazano broker/subskrypcje/Discovery/outbox odrebnie w UART i HTTPS.
+- [x] Testy hostowe synchronizacji (SUBACK/retry/reconnect/birth) oraz 24 encji
+  local/debug (JSON, za maly bufor, blad alokacji); build bez ostrzezen.
+- [x] Test pelnego JSON 39 encji na hoscie; reconnect uzywa cache JSON.
+- [ ] Pomiar przyczyny na ESP32 i ewentualny streaming serializer zmniejszajacy
+  pierwszy szczyt alokacji.
+- [ ] HIL: reconnect, HA birth, brak RAM, 0/1/wiele kart HTTPS i OTA na ESP32.
+
+Nie zmieniac GPIO, persistent settings, 39 identyfikatorow encji ani lokalnego sterowania.
+Bez publikacji, tagu, OTA i flashowania bez zgody uzytkownika. Niedobor RAM i
+wylaczny wplyw HTTPS sa hipotezami do pomiaru; lawina SUBSCRIBE jest potwierdzona.
+Koncowy `scripts/check.sh`: 161 plikow UTF-8, 10 testow narzedziowych, testy
+hostowe i build PASS. Osobny `pio run -e esp32doit-devkit-v1`: PASS, bez nowych
+ostrzezen; RAM statyczny 118 704 B, flash 1 383 609 B. Tych wynikow nie
+traktowac jako HIL ani potwierdzenia nizszego szczytu heap na urzadzeniu.
+
 ## 2026-10-08 - Jednym skryptem: wydanie GitHub i MQTT OTA
 
 - [x] Sprawdzono: origin/main odpowiada lokalnemu commitowi, broker slucha na

@@ -892,6 +892,17 @@ void ServiceConsole::printMqttStatus() const noexcept {
     std::printf("Komendy przyjete/odrzucone: %" PRIu32 "/%" PRIu32 "\n", status.accepted_commands,
                 status.rejected_commands);
     std::printf("Zalegle publikacje: %s\n", status.publish_backlog ? "tak" : "nie");
+    std::printf("Broker: %s; birth: %s\n",
+                status.state == MqttService::State::connected ? "polaczony" : "niepolaczony",
+                status.birth_queued ? "zakolejkowany" : "oczekuje");
+    std::printf("Subskrypcje: %u/%u (%s)\n", static_cast<unsigned>(status.subscriptions_done),
+                static_cast<unsigned>(MqttSyncMachine::kSubscriptionCount),
+                status.subscriptions_ready ? "potwierdzone" : "w toku");
+    std::printf("Discovery: %s%s, JSON %" PRIu32 " B\n",
+                status.discovery_queued ? "zakolejkowane" : "oczekuje",
+                status.discovery_confirmed ? ", PUBACK" : "", status.discovery_payload_bytes);
+    std::printf("Outbox: %" PRIu32 " B; blad sync: %s\n", status.outbox_bytes,
+                MqttService::syncErrorName(status.last_sync_error));
     std::printf("Zmiany oczekujace na apply: %s\n", status.pending_changes ? "tak" : "nie");
 #if LED_CONTROLLER_AT24C08_ENABLED
     const SettingsService::Status storage = settings_service_.status();
