@@ -21,6 +21,7 @@
 #include "PersistentSettings.hpp"
 #include "PirAutomation.hpp"
 #include "SecureSettingsRecord.hpp"
+#include "StackModel.hpp"
 #include "StatusIndicator.hpp"
 #include "TemperatureModel.hpp"
 #include "WebLogBuffer.hpp"
@@ -1376,14 +1377,14 @@ void testDiscoveryJsonFragmentsAndFailures() noexcept {
     if (components != nullptr) {
         EXPECT_TRUE(local_control::appendDiscovery(components, "sterownik-led/device", "device"));
         EXPECT_TRUE(debug_discovery::append(components, "sterownik-led/device", "device"));
-        EXPECT_EQ(24, cJSON_GetArraySize(components));
+        EXPECT_EQ(25, cJSON_GetArraySize(components));
         std::array<char, 24'576> payload{};
         EXPECT_TRUE(
             cJSON_PrintPreallocated(root, payload.data(), static_cast<int>(payload.size()), false));
         cJSON* const parsed = cJSON_Parse(payload.data());
         EXPECT_TRUE(parsed != nullptr);
         if (parsed != nullptr) {
-            EXPECT_EQ(24, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(parsed, "cmps")));
+            EXPECT_EQ(25, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(parsed, "cmps")));
             cJSON_Delete(parsed);
         }
         std::array<char, 64> short_payload{};
@@ -1535,8 +1536,8 @@ void testFullDiscoveryPayload() noexcept {
         cJSON* const components = cJSON_GetObjectItemCaseSensitive(parsed, "cmps");
         EXPECT_TRUE(components != nullptr);
         if (components != nullptr) {
-            EXPECT_EQ(39, cJSON_GetArraySize(components));
-            constexpr std::array<const char*, 39> expected_ids{{"key_1",
+            EXPECT_EQ(40, cJSON_GetArraySize(components));
+            constexpr std::array<const char*, 40> expected_ids{{"key_1",
                                                                 "key_2",
                                                                 "key_3",
                                                                 "key_4",
@@ -1560,6 +1561,7 @@ void testFullDiscoveryPayload() noexcept {
                                                                 "reset_reason",
                                                                 "uptime",
                                                                 "debug_dropped",
+                                                                "stack",
                                                                 "channel_1",
                                                                 "channel_2",
                                                                 "channel_3",
@@ -1801,7 +1803,7 @@ void testDebugOverflowAndRenewal() noexcept {
 void testDebugDiscovery() noexcept {
     cJSON* root = cJSON_CreateObject();
     EXPECT_TRUE(debug_discovery::append(root, "led/device", "device"));
-    EXPECT_EQ(4, cJSON_GetArraySize(root));
+    EXPECT_EQ(5, cJSON_GetArraySize(root));
     cJSON* item = cJSON_GetObjectItemCaseSensitive(root, "debug");
     EXPECT_TRUE(std::strcmp(cJSON_GetObjectItemCaseSensitive(item, "command_topic")->valuestring,
                             "led/device/debug/set") == 0);
@@ -1949,7 +1951,30 @@ void testLocalOtaButtonGesture() noexcept {
     EXPECT_EQ(ButtonGesture::Event::none, gesture.update(true, 30000));
 }
 
+void testStackModel() noexcept {
+    stack_model::Record r{};
+    EXPECT_TRUE(r.severity() == stack_model::Level::unknown);
+    r.observe(4096, 1024, 10);
+    EXPECT_TRUE(r.severity() == stack_model::Level::ok);
+    r.observe(4096, 511, 20);
+    EXPECT_TRUE(r.severity() == stack_model::Level::warning);
+    r.observe(4096, 900, 30);
+    EXPECT_EQ(511U, r.minimum);
+    EXPECT_EQ(20U, r.minimum_at);
+    EXPECT_EQ(30U, r.sampled_at);
+    r.observe(4096, 255, 40, true);
+    EXPECT_TRUE(r.severity() == stack_model::Level::critical);
+    EXPECT_TRUE(r.finished);
+    r.observe(4096, 5000, 50);
+    EXPECT_EQ(40U, r.sampled_at);
+    EXPECT_TRUE(stack_model::level(256) == stack_model::Level::warning);
+    EXPECT_TRUE(stack_model::level(512) == stack_model::Level::ok);
+    r.observe(4096, 0, 60);
+    EXPECT_TRUE(r.severity() == stack_model::Level::critical);
+}
+
 int main() {
+    testStackModel();
     testPwmConstraints();
     testPwmNvramMigration();
     testLocalOtaImageHeader();

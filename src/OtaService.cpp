@@ -1,6 +1,7 @@
 #include "OtaService.hpp"
 
 #include "DeviceIdentity.hpp"
+#include "StackMonitor.hpp"
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_https_ota.h"
@@ -228,6 +229,7 @@ void OtaService::taskEntry(void* const context) noexcept {
         const TickType_t validation_started = xTaskGetTickCount();
         const TickType_t validation_delay = pdMS_TO_TICKS(kValidationDelayMs);
         for (;;) {
+            stack_monitor::sample(stack_monitor::Task::ota, kTaskStackSize);
             const TickType_t elapsed = xTaskGetTickCount() - validation_started;
             if (elapsed >= validation_delay) {
                 break;
@@ -248,8 +250,9 @@ void OtaService::taskEntry(void* const context) noexcept {
     }
 
     for (;;) {
+        stack_monitor::sample(stack_monitor::Task::ota, kTaskStackSize);
         Request request{};
-        if (xQueueReceive(request_queue_, &request, portMAX_DELAY) != pdPASS) {
+        if (xQueueReceive(request_queue_, &request, pdMS_TO_TICKS(10000)) != pdPASS) {
             continue;
         }
         const esp_err_t result = performUpdate(request);
@@ -266,6 +269,7 @@ esp_err_t OtaService::validatePendingImage() noexcept {
 }
 
 esp_err_t OtaService::performUpdate(const Request& request) noexcept {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::ota, kTaskStackSize);
     updateStatus(State::downloading, 0U, ESP_OK);
 
     esp_http_client_config_t http_config{};
@@ -345,6 +349,7 @@ esp_err_t OtaService::performUpdate(const Request& request) noexcept {
     updateStatus(State::rebooting, 100U, ESP_OK, candidate.version);
     ESP_LOGI(kTag, "Obraz zweryfikowany; restart do wersji %.32s", candidate.version);
     static_cast<void>(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kRebootStatusDelayMs)));
+    stack_monitor::sample(stack_monitor::Task::ota, kTaskStackSize, true);
     esp_restart();
     return ESP_OK;
 }

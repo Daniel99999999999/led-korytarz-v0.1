@@ -3,6 +3,7 @@
 #include "LocalOtaService.hpp"
 #include "MqttCommandParser.hpp"
 #include "MqttService.hpp"
+#include "StackMonitor.hpp"
 #include "TaskWatchdog.hpp"
 #include "WifiService.hpp"
 #include "esp_log.h"
@@ -286,6 +287,7 @@ void LedController::taskEntry(void* const context) noexcept {
     bool status_error_reported = false;
     bool watchdog_error_reported = false;
     for (;;) {
+        stack_monitor::sample(stack_monitor::Task::led, kTaskStackSize);
         const TickType_t now = xTaskGetTickCount();
         uptime_ticks_ += static_cast<TickType_t>(now - last_uptime_tick_);
         last_uptime_tick_ = now;

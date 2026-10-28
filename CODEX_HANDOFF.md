@@ -1,5 +1,14 @@
 # Handoff dla Codex
 
+## 2026-10-27 - robocza wersja 0.10.4
+
+Na zyczenie uzytkownika PROJECT_VER=0.10.4. Dodano diagnostyke stosow
+WWW/MQTT i blueprint push z wyborem telefonu Daniela. Stan prac i ograniczenia:
+[STACK_MONITOR_0.10.4.md](docs/STACK_MONITOR_0.10.4.md). Bez publikacji i OTA;
+aktualizacja numeru nie oznacza walidacji na sprzecie. Starsza instrukcja
+ponizej o pozostawieniu numeru 0.10.3 dotyczy poprzedniego etapu.
+
+
 ## Aktualny stan (2026-10-12)
 
 Urzadzenie i publiczny Release nadal sa `0.10.3`. Lokalny kod ma robocza

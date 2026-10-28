@@ -3,6 +3,7 @@
 #include "BoardConfig.hpp"
 #include "DebugLog.hpp"
 #include "DeviceIdentity.hpp"
+#include "StackMonitor.hpp"
 #if LED_CONTROLLER_INA228_ENABLED
 #include "Ina228Scaling.hpp"
 #endif
@@ -248,6 +249,7 @@ esp_err_t ServiceConsole::start() noexcept {
 }
 
 int ServiceConsole::logsCommandEntry(void* const, const int argc, char** const argv) noexcept {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::console, 4096);
     auto& logger = DebugLog::instance();
     if (argc == 2) {
         if (std::strcmp(argv[1], "on") == 0) {
@@ -270,6 +272,7 @@ int ServiceConsole::logsCommandEntry(void* const, const int argc, char** const a
 }
 
 int ServiceConsole::commandEntry(void* const context, const int argc, char** const argv) noexcept {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::console, 4096);
     auto* const console = static_cast<ServiceConsole*>(context);
 #if LED_CONTROLLER_AT24C08_ENABLED
     if (console->mustChangeWebPassword())
@@ -280,6 +283,7 @@ int ServiceConsole::commandEntry(void* const context, const int argc, char** con
 
 int ServiceConsole::mqttCommandEntry(void* const context, const int argc,
                                      char** const argv) noexcept {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::console, 4096);
     auto* const console = static_cast<ServiceConsole*>(context);
 #if LED_CONTROLLER_AT24C08_ENABLED
     if (console->mustChangeWebPassword())
@@ -291,6 +295,7 @@ int ServiceConsole::mqttCommandEntry(void* const context, const int argc,
 #if LED_CONTROLLER_AT24C08_ENABLED
 int ServiceConsole::settingsCommandEntry(void* const context, const int argc,
                                          char** const argv) noexcept {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::console, 4096);
     auto* const console = static_cast<ServiceConsole*>(context);
     if (console->mustChangeWebPassword() &&
         !(argc == 2 &&
@@ -315,6 +320,7 @@ int ServiceConsole::printPasswordChangeRequired() noexcept {
 #if LED_CONTROLLER_INA228_ENABLED
 int ServiceConsole::ina228CommandEntry(void* const context, const int argc,
                                        char** const argv) noexcept {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::console, 4096);
     auto* const console = static_cast<ServiceConsole*>(context);
 #if LED_CONTROLLER_AT24C08_ENABLED
     if (console->mustChangeWebPassword())
@@ -327,6 +333,7 @@ int ServiceConsole::ina228CommandEntry(void* const context, const int argc,
 #if LED_CONTROLLER_DS18B20_ENABLED
 int ServiceConsole::temperatureCommandEntry(void* const context, const int argc,
                                             char** const argv) noexcept {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::console, 4096);
     auto* const console = static_cast<ServiceConsole*>(context);
 #if LED_CONTROLLER_AT24C08_ENABLED
     if (console->mustChangeWebPassword())

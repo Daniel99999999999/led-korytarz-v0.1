@@ -1,6 +1,7 @@
 #include "LocalOtaService.hpp"
 
 #include "LocalOtaValidation.hpp"
+#include "StackMonitor.hpp"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -52,6 +53,7 @@ void LocalOtaService::taskEntry(void* context) noexcept {
 void LocalOtaService::taskLoop() noexcept {
     TickType_t session = 0;
     for (;;) {
+        stack_monitor::sample(stack_monitor::Task::local_ota, 4096);
         if (reboot_.load(std::memory_order_acquire)) {
             static_cast<void>(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)));
             esp_restart();
@@ -194,6 +196,7 @@ bool LocalOtaService::fromAp(httpd_req_t* request) const noexcept {
            local.sin_family == AF_INET && local.sin_addr.s_addr == ap_address_;
 }
 esp_err_t LocalOtaService::page(httpd_req_t* request) {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::http, 8192, false);
     auto& service = *static_cast<LocalOtaService*>(request->user_ctx);
     if (!service.fromAp(request))
         return httpd_resp_send_err(request, HTTPD_403_FORBIDDEN, "Tylko hotspot serwisowy");
@@ -205,6 +208,7 @@ esp_err_t LocalOtaService::page(httpd_req_t* request) {
     return httpd_resp_send(request, html.data(), HTTPD_RESP_USE_STRLEN);
 }
 esp_err_t LocalOtaService::upload(httpd_req_t* request) {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::http, 8192, false);
     auto& service = *static_cast<LocalOtaService*>(request->user_ctx);
     std::array<char, 33> token{};
     if (!service.fromAp(request) || httpd_req_get_hdr_value_len(request, "X-OTA-Token") != 32 ||

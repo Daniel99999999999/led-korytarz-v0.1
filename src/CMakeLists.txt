@@ -12,6 +12,7 @@ set(component_sources
         "MqttService.cpp"
         "MqttDiscoveryPayload.cpp"
         "DebugLog.cpp"
+        "StackMonitor.cpp"
         "DebugDiscovery.cpp"
         "OtaService.cpp"
         "LocalOtaService.cpp"

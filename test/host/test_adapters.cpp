@@ -1,3 +1,4 @@
+#include "StackMonitor.hpp"
 // Exercise the real LCD/LED adapters against a scripted transport, not physical hardware.
 #include "BoardConfig.hpp"
 #include "DebugLog.hpp"
@@ -208,6 +209,38 @@ void testDebugHook() {
 } // namespace
 
 int main() {
+    {
+        using stack_monitor::Task;
+        stack_model::Record record{};
+        fakeMicroseconds = 0;
+        fakeStackSamples = 0;
+        fakeIsr = true;
+        stack_monitor::sample(Task::led, 4096, true);
+        CHECK(fakeStackSamples == 0);
+        fakeIsr = false;
+        CHECK(stack_monitor::read(Task::led, record) && !record.valid);
+        stack_monitor::sample(Task::led, 4096);
+        CHECK(fakeStackSamples == 1);
+        fakeStackFree = 400;
+        fakeMicroseconds = 9000000;
+        stack_monitor::sample(Task::led, 4096);
+        CHECK(fakeStackSamples == 1);
+        fakeMicroseconds = 10000000;
+        stack_monitor::sample(Task::led, 4096);
+        CHECK(stack_monitor::read(Task::led, record) && record.minimum == 400);
+        fakeStackFree = 200;
+        { stack_monitor::Scope sample(Task::web_start, 16384, true); }
+        CHECK(stack_monitor::read(Task::web_start, record) && record.finished &&
+              record.minimum == 200);
+        const auto summary = stack_monitor::summary();
+        CHECK(summary.complete && summary.measured == 2 && summary.task == Task::web_start);
+        fakeStackFree = 1900;
+        stack_monitor::sample(Task::web_start, 16384, true, true);
+        CHECK(stack_monitor::read(Task::web_start, record) && record.minimum == 200);
+        CHECK(!stack_monitor::read(Task::count, record));
+        fakeMicroseconds = 0;
+    }
+
     testDebugHook();
     LcdDisplay lcd;
     initialize(lcd, false);

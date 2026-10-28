@@ -5,11 +5,13 @@
 #include "LedController.hpp"
 #include "MqttCommandParser.hpp"
 #include "MqttDiscoveryPayload.hpp"
+#include "StackMonitor.hpp"
 #include "WifiService.hpp"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_random.h"
 
 #include <algorithm>
 #include <array>
@@ -529,6 +531,7 @@ void MqttService::taskEntry(void* const context) noexcept {
     bool ota_retry_pending = false;
     std::uint32_t observed_generation = 0;
     for (;;) {
+        stack_monitor::sample(stack_monitor::Task::mqtt_service, kServiceTaskStackSize);
         static_cast<void>(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200)));
         startClientWhenNetworkReady();
         if (!connected_.load(std::memory_order_acquire)) {
@@ -542,6 +545,7 @@ void MqttService::taskEntry(void* const context) noexcept {
             publish_tracker_.invalidateAll();
             ota_status_published_ = false;
             debug_status_published_ = false;
+            stack_status_published_ = false;
             last_state_publish = 0;
             ota_retry_pending = false;
         }
@@ -552,6 +556,7 @@ void MqttService::taskEntry(void* const context) noexcept {
             publish_tracker_.invalidateAll();
             ota_status_published_ = false;
             debug_status_published_ = false;
+            stack_status_published_ = false;
             MutexGuard lock(mutex_);
             if (lock.locked()) {
                 status_.birth_queued = false;
@@ -584,6 +589,9 @@ void MqttService::eventHandler(void* const context, const esp_event_base_t event
     static_cast<void>(event_base);
     static_cast<void>(event_id);
     auto* const service = static_cast<MqttService*>(context);
+
+    stack_monitor::Scope stack_sample(stack_monitor::Task::mqtt_client, kServiceTaskStackSize,
+                                      false);
     service->handleEvent(static_cast<esp_mqtt_event_handle_t>(event_data));
 }
 
@@ -1773,6 +1781,58 @@ void MqttService::serviceDebug() noexcept {
         return;
     }
     const auto now_seconds = DebugLog::seconds();
+    const auto stack = stack_monitor::summary();
+    const auto level = static_cast<unsigned>(stack.record.severity());
+    const bool escalated = stack_status_published_ && level > stack_level_published_;
+    if (stack.complete && (!stack_status_published_ || escalated ||
+                           ((stack.record.minimum != stack_minimum_published_ ||
+                             stack.measured != stack_measured_published_) &&
+                            now_seconds - stack_publish_seconds_ >= 60U))) {
+        if (stack_boot_id_ == 0) {
+            stack_boot_id_ = esp_random();
+            if (stack_boot_id_ == 0)
+                stack_boot_id_ = 1;
+        }
+        const int topic_length = std::snprintf(stack_topic_.data(), stack_topic_.size(),
+                                               "%s/stack/status", topics_.base.data());
+        const int length = std::snprintf(
+            stack_payload_.data(), stack_payload_.size(),
+            "{\"level\":\"%s\",\"task\":\"%s\",\"minimum\":%lu,\"budget\":%lu,"
+            "\"used_peak\":%lu,\"sampled_at\":%lu,\"minimum_at\":%lu,\"uptime_s\":%lu,"
+            "\"boot_id\":%lu,\"measured_tasks\":%u,\"version\":\"%s\",\"reset_reason\":\"%s\","
+            "\"heap_free\":%u,\"heap_minimum\":%u,\"heap_largest\":%u}",
+            stack_model::name(stack.record.severity()), stack_monitor::name(stack.task),
+            static_cast<unsigned long>(stack.record.minimum),
+            static_cast<unsigned long>(stack.record.budget),
+            static_cast<unsigned long>(stack.record.budget - stack.record.minimum),
+            static_cast<unsigned long>(stack.record.sampled_at),
+            static_cast<unsigned long>(stack.record.minimum_at),
+            static_cast<unsigned long>(now_seconds), static_cast<unsigned long>(stack_boot_id_),
+            stack.measured, esp_app_get_description()->version, DebugLog::resetReason(),
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+            static_cast<unsigned>(
+                heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+            static_cast<unsigned>(
+                heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+        if (topic_length > 0 && static_cast<std::size_t>(topic_length) < stack_topic_.size() &&
+            length > 0 && static_cast<std::size_t>(length) < stack_payload_.size() &&
+            enqueueMessage(client_, stack_topic_.data(), stack_payload_.data(), true)) {
+            if (level > stack_logged_level_ && level >= 2U) {
+                stack_logged_level_ = level;
+                ESP_LOGW(kTag, "Stack %s: %s minimum=%lu B budget=%lu B",
+                         stack_model::name(stack.record.severity()),
+                         stack_monitor::name(stack.task),
+                         static_cast<unsigned long>(stack.record.minimum),
+                         static_cast<unsigned long>(stack.record.budget));
+            }
+            stack_measured_published_ = stack.measured;
+            stack_status_published_ = true;
+            stack_level_published_ = level;
+            stack_minimum_published_ = stack.record.minimum;
+            stack_publish_seconds_ = now_seconds;
+        }
+    }
+
     if (!debug_status_published_ || status.active != debug_active_published_ ||
         static_cast<std::uint32_t>(now_seconds - debug_status_seconds_) >= 10U) {
         std::array<char, 256> payload{};

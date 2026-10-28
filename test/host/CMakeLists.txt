@@ -56,6 +56,7 @@ endif()
 add_test(NAME led_controller_host_tests COMMAND led_controller_host_tests)
 
 add_executable(led_controller_adapter_tests test_adapters.cpp
+    "${PROJECT_ROOT}/src/StackMonitor.cpp"
     "${PROJECT_ROOT}/src/DebugLog.cpp"
     "${PROJECT_ROOT}/src/LcdDisplay.cpp" "${PROJECT_ROOT}/src/LedChannel.cpp"
     "${PROJECT_ROOT}/src/ChannelState.cpp" "${PROJECT_ROOT}/src/DutyTransition.cpp")

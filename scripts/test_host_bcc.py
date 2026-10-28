@@ -27,7 +27,7 @@ def main():
     run([str(output / "logic.exe")])
     run(flags + ["-I" + str(root / "test/host/stubs"), "-I" + str(root / "src"), "-oadapters.exe"]
         + [str(root / source) for source in ["test/host/test_adapters.cpp", "src/LcdDisplay.cpp",
-           "src/LedChannel.cpp", "src/ChannelState.cpp", "src/DutyTransition.cpp", "src/DebugLog.cpp"]])
+           "src/LedChannel.cpp", "src/ChannelState.cpp", "src/DutyTransition.cpp", "src/DebugLog.cpp", "src/StackMonitor.cpp"]])
     run([str(output / "adapters.exe")])
 
 

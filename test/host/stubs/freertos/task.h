@@ -9,3 +9,10 @@ inline TaskHandle_t xTaskGetCurrentTaskHandle() {
 inline bool xPortInIsrContext() {
     return fakeIsr;
 }
+
+inline unsigned fakeStackFree = 2048;
+inline unsigned fakeStackSamples = 0;
+inline unsigned uxTaskGetStackHighWaterMark(TaskHandle_t) {
+    ++fakeStackSamples;
+    return fakeStackFree;
+}
