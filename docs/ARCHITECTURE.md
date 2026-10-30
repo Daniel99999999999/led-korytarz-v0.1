@@ -133,3 +133,14 @@ Wymagany jest HIL startu z pustym NVS certyfikatu i z certyfikatem zapisanym.
 Skan DS18B20 co 30 s sprawdza najpierw impuls obecnosci. Pusta magistrala jest
 stanem normalnym i nie wywoluje ostrzezen iteratora ROM; inne bledy 1-Wire
 pozostaja widoczne. Skan reczny nadal odswieza stan czujnikow.
+
+## Diagnostyka stosu 0.10.4
+
+StackMonitor zbiera self-samples 13 rol zadan, bez zachowywania uchwytow RTOS,
+bez dodatkowego zadania i alokacji heap. Wynik minimum od startu jest historyczny;
+nieaktywne/niezmierzone role sa unknown. Web pokazuje wszystkie role z wiekiem
+pomiaru, MQTT publikuje zagregowany stan i kontekst heap/reset/wersja w osobnej
+encji Discovery. Pomiar i eksport nie wymagaja wlaczenia debug MQTT.
+Powiadomienie push realizuje blueprint HA z jawnym wyborem telefonu Daniela
+oraz pomocnikiem deduplikacji. Konfiguracja w HA i HIL pozostaja do wykonania.
+Szczegoly i ograniczenia: [STACK_MONITOR_0.10.4.md](STACK_MONITOR_0.10.4.md).

@@ -1,5 +1,6 @@
 #include "WifiService.hpp"
 
+#include "StackMonitor.hpp"
 #include "esp_log.h"
 #include "esp_netif_sntp.h"
 #include "lwip/def.h"
@@ -532,6 +533,9 @@ WifiService::restorePersistentConfig(const persistent_settings::WifiConfig& inpu
 
 void WifiService::eventHandler(void* const context, const esp_event_base_t event_base,
                                const std::int32_t event_id, void* const event_data) noexcept {
+
+    stack_monitor::Scope stack_sample(stack_monitor::Task::event,
+                                      CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE, false);
     auto* const service = static_cast<WifiService*>(context);
     if (event_base == WIFI_EVENT) {
         service->handleWifiEvent(event_id, event_data);

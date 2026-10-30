@@ -1,6 +1,7 @@
 #include "DebugLog.hpp"
 #include "DeviceIdentity.hpp"
 #include "FeatureConfig.hpp"
+#include "StackMonitor.hpp"
 #if LED_CONTROLLER_IR_NEC_ENABLED
 #include "IrReceiverService.hpp"
 #endif
@@ -41,12 +42,15 @@ void webStartupTask(void* context) {
     }
     ESP_LOGI(kTag, "Zadanie startowe HTTPS: minimalny wolny stos %u B",
              static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+    stack_monitor::sample(stack_monitor::Task::web_start, kWebStartupStackSize, true, true);
     vTaskDelete(nullptr);
 }
 #endif
-}
+} // namespace
 
 extern "C" void app_main() {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::main, CONFIG_ESP_MAIN_TASK_STACK_SIZE,
+                                      true);
     DebugLog::instance().install();
     ESP_LOGI(kTag, "%s - firmware v%s", device_identity::kDisplayName,
              esp_app_get_description()->version);

@@ -1,0 +1,69 @@
+blueprint:
+  name: Sterownik LED - alarm stosu dla Daniela
+  description: >-
+    Wybierz telefon Daniela, encje Stos - diagnostyka oraz osobny pomocnik tekstowy
+    (input_text, minimum 80 znakow, bez initial). Jeden push na poziom i uruchomienie
+    sterownika. Helper zachowuje deduplikacje po restarcie HA. Wymaga firmware 0.10.4.
+  domain: automation
+  input:
+    stack_sensor:
+      name: Stos - diagnostyka sterownika
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              integration: mqtt
+    daniel_phone:
+      name: Telefon Daniela (sprawdz wlasciciela)
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+    last_alert:
+      name: Pomocnik tekstowy - ostatni alarm stosu
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+mode: single
+max_exceeded: silent
+variables:
+  stack_entity: !input stack_sensor
+  alert_helper: !input last_alert
+triggers:
+  - trigger: state
+    entity_id: !input stack_sensor
+  - trigger: time_pattern
+    minutes: "/1"
+conditions:
+  - condition: template
+    value_template: >-
+      {{ states(stack_entity) in ['warning', 'critical']
+         and state_attr(stack_entity, 'boot_id') is not none
+         and states(alert_helper) not in ['unknown', 'unavailable'] }}
+actions:
+  - variables:
+      alarm_key: "{{ stack_entity ~ ':' ~ state_attr(stack_entity, 'boot_id') ~ ':' ~ states(stack_entity) }}"
+      alarm_message: >-
+        Stos {{ states(stack_entity) }}: {{ state_attr(stack_entity, 'task') }}.
+        Minimum wolnego: {{ state_attr(stack_entity, 'minimum') }} B
+        z {{ state_attr(stack_entity, 'budget') }} B.
+        Firmware {{ state_attr(stack_entity, 'version') }},
+        uptime pomiaru {{ state_attr(stack_entity, 'sampled_at') }} s.
+        Ostatni reset: {{ state_attr(stack_entity, 'reset_reason') }}.
+        Heap wolny {{ state_attr(stack_entity, 'heap_free') }} B,
+        najwiekszy blok {{ state_attr(stack_entity, 'heap_largest') }} B.
+  - condition: template
+    value_template: "{{ states(alert_helper) != alarm_key }}"
+  - domain: mobile_app
+    type: notify
+    device_id: !input daniel_phone
+    title: "Sterownik LED - maly zapas stosu"
+    message: "{{ alarm_message }}"
+    data:
+      tag: "{{ stack_entity }}"
+  - action: input_text.set_value
+    target:
+      entity_id: !input last_alert
+    data:
+      value: "{{ alarm_key }}"

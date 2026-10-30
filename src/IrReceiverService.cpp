@@ -3,6 +3,7 @@
 #include "BoardConfig.hpp"
 #include "ControlCommand.hpp"
 #include "LedController.hpp"
+#include "StackMonitor.hpp"
 #include "esp_log.h"
 
 #include <algorithm>
@@ -97,6 +98,7 @@ void IrReceiverService::taskEntry(void* const context) noexcept {
 [[noreturn]] void IrReceiverService::taskLoop() noexcept {
     bool receive_error_reported = false;
     for (;;) {
+        stack_monitor::sample(stack_monitor::Task::ir, kTaskStackSize);
         const esp_err_t receive_result =
             rmt_receive(channel_, raw_symbols_.data(), sizeof(raw_symbols_), &receive_config_);
         if (receive_result != ESP_OK) {

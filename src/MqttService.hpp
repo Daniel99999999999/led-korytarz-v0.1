@@ -269,6 +269,11 @@ class MqttService final {
     std::uint32_t ota_status_revision_published_{0};
     bool ota_status_published_{false};
     bool debug_status_published_{false};
+    std::uint32_t stack_publish_seconds_{0}, stack_minimum_published_{0}, stack_boot_id_{0};
+    unsigned stack_level_published_{0}, stack_measured_published_{0}, stack_logged_level_{0};
+    bool stack_status_published_{false};
+    std::array<char, 768> stack_payload_{};
+    std::array<char, kTopicLength> stack_topic_{};
     bool debug_active_published_{false};
     std::uint32_t debug_status_seconds_{0};
     TickType_t debug_log_tick_{0};

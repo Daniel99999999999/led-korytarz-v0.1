@@ -300,3 +300,10 @@ Najpierw uruchom płytkę bez pełnego obciążenia i sprawdź oscyloskopem:
 19. wejście PIR ma LOW przy zamkniętym NC i HIGH po otwarciu lub przerwaniu przewodu; po filtracji odpowiednia encja HA przechodzi między `OFF` i `ON` bez zmiany PWM.
 
 Fade jest liczony programowo i aktualizowany co 5 ms przez pojedynczy task kontrolera. Firmware zapisuje duty przez `ledc_set_duty()` i `ledc_update_duty()` oraz nie uruchamia sprzętowej usługi fade LEDC. Błąd pojedynczego kanału zatrzymuje go w LOW bez powtarzania logu i bez blokowania pozostałych wejść.
+
+## Diagnostyka stosu 0.10.4
+
+Panel WWW i MQTT udostepniaja historyczny zapas stosu zadan. Instrukcja
+odczytu, zakres monitorowania i konfiguracja push tylko na telefon Daniela:
+[STACK_MONITOR_0.10.4.md](docs/STACK_MONITOR_0.10.4.md).
+Blueprint wymaga wyboru telefonu w HA; nie jest aktywowany przez samo wgranie firmware.

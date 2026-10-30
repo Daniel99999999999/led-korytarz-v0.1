@@ -1,6 +1,7 @@
 #include "LcdService.hpp"
 
 #include "BoardConfig.hpp"
+#include "StackMonitor.hpp"
 #if LED_CONTROLLER_INA228_ENABLED
 #include "Ina228Scaling.hpp"
 #endif
@@ -283,6 +284,7 @@ void LcdService::taskEntry(void* const context) noexcept {
     }
 
     for (;;) {
+        stack_monitor::sample(stack_monitor::Task::lcd, kTaskStackSize);
         Snapshot received_snapshot{};
         if (xQueueReceive(snapshot_queue_, &received_snapshot, 0) == pdPASS) {
             latest_snapshot = received_snapshot;

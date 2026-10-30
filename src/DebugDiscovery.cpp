@@ -46,6 +46,22 @@ bool append(cJSON* components, const char* base, const char* device_id) noexcept
             return false;
         }
     }
+    std::array<char, 160> topic{};
+    std::array<char, 80> id{};
+    const int a = std::snprintf(topic.data(), topic.size(), "%s/stack/status", base);
+    const int b = std::snprintf(id.data(), id.size(), "%s_stack", device_id);
+    if (a < 0 || static_cast<std::size_t>(a) >= topic.size() || b < 0 ||
+        static_cast<std::size_t>(b) >= id.size())
+        return false;
+    cJSON* item = cJSON_AddObjectToObject(components, "stack");
+    if (!item || !cJSON_AddStringToObject(item, "p", "sensor") ||
+        !cJSON_AddStringToObject(item, "name", "Stos - diagnostyka") ||
+        !cJSON_AddStringToObject(item, "unique_id", id.data()) ||
+        !cJSON_AddStringToObject(item, "entity_category", "diagnostic") ||
+        !cJSON_AddStringToObject(item, "state_topic", topic.data()) ||
+        !cJSON_AddStringToObject(item, "json_attributes_topic", topic.data()) ||
+        !cJSON_AddStringToObject(item, "value_template", "{{ value_json.level }}"))
+        return false;
     return true;
 }
 } // namespace debug_discovery

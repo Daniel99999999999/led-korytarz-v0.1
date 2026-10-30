@@ -1,5 +1,22 @@
 # Execution Plans
 
+## 2026-10-27 - 0.10.4 diagnostyka stosu
+
+- [x] Kontrola bazowa check.sh PASS.
+- [x] Monitor stosow bez uchwytow do usuwanych zadan, panel WWW, MQTT.
+- [x] Blueprint push z jawnym wyborem telefonu Daniela; skladnia YAML PASS.
+- [x] Testy hostowe, adaptery, build i dokumentacja PASS; bez publikacji/flashowania.
+- [ ] HIL i konfiguracja telefonu w HA.
+
+
+## 2026-10-26 - Audyt stosu (bez wydania)
+
+- [x] Kontrakty, budzety zadan, bufory i sciezki wywolan.
+- [x] Ramki instrukcji Xtensa z aktualnej kompilacji; raport docs/STACK_AUDIT_0.10.3.md.
+- [x] check.sh PASS: build ESP32, host, adaptery; brak ostrzezen kompilatora.
+- [ ] HIL minimow stosu przed jakakolwiek redukcja budzetow.
+
+
 ## 2026-10-12 - Walidacja RAM Discovery 0.10.3 (bez wydania)
 
 - [x] Odczytano kontrakty i uruchomiono bazowy `scripts/check.sh` (PASS).

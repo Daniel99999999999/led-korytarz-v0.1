@@ -6,6 +6,7 @@
 #include "MqttService.hpp"
 #include "OtaService.hpp"
 #include "SettingsService.hpp"
+#include "StackMonitor.hpp"
 #include "WebPassword.hpp"
 #include "WifiService.hpp"
 #include "cJSON.h"
@@ -81,7 +82,7 @@ constexpr char kPage[] = R"HTML(<!doctype html>
 <html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sterownik LED</title><style>
 :root{font-family:system-ui,sans-serif;color:#20292d;background:#f5f7f7}*{box-sizing:border-box}body{margin:0}header{background:#fff;border-bottom:1px solid #d8e0e1;padding:18px max(18px,calc((100vw - 1120px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px}h1{font-size:23px;margin:0;font-weight:650}h2{font-size:17px;margin:0 0 14px}main{max-width:1120px;margin:auto;padding:24px 18px 50px}.meta{font-size:13px;color:#657276}.summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;border-bottom:1px solid #d8e0e1;padding:0 0 22px}.summary section{min-width:0}.metric{display:grid;grid-template-columns:120px minmax(0,1fr);gap:7px;font-size:14px;margin:7px 0}.metric span{color:#657276}.metric strong{font-weight:550;overflow-wrap:anywhere}.ok{color:#127365}.warn{color:#a45420}.bad{color:#b53e37}.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;margin-top:25px}.rows{border-top:1px solid #d8e0e1}.row{display:grid;grid-template-columns:110px minmax(0,1fr) 85px;align-items:center;gap:14px;min-height:42px;border-bottom:1px solid #e2e8e9;font-size:14px}.track{height:7px;background:#e1e7e8}.fill{height:100%;background:#157e71}.off .fill{background:#9aa5a8}.muted{color:#687578}button{border:1px solid #becbcd;background:white;color:#233b40;padding:8px 12px;border-radius:4px;cursor:pointer;font:inherit}button:hover{border-color:#157e71}button:disabled{opacity:.5;cursor:default}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.logs{margin-top:30px;border-top:1px solid #d8e0e1;padding-top:20px}.logs-head{display:flex;justify-content:space-between;align-items:center;gap:10px}pre{background:#182225;color:#d9e9e5;padding:14px;min-height:180px;max-height:390px;overflow:auto;font:12px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:4px}#message{font-size:13px;min-height:18px;color:#a45420}@media(max-width:720px){header{padding:14px 18px}.summary,.grid{grid-template-columns:1fr;gap:18px}.grid{margin-top:20px}.row{grid-template-columns:92px minmax(0,1fr) 70px}}
-</style></head><body><header><div><h1>Sterownik LED</h1><div id="version" class="meta">Ladowanie...</div></div><div id="connection" class="meta">Laczenie</div></header><main><div class="summary"><section><h2>Sieć</h2><div id="wifi"></div></section><section><h2>MQTT</h2><div id="mqtt"></div></section><section><h2>System</h2><div id="system"></div></section></div><div class="grid"><section><h2>Kanały LED</h2><div id="channels" class="rows"></div></section><section><h2>Czujniki</h2><div id="sensors" class="rows"></div><div class="toolbar" style="margin-top:14px"><button id="wifi-scan" title="Skanuj sieci Wi-Fi">Skan Wi-Fi</button><button id="temp-scan" title="Skanuj magistralę 1-Wire">Skan temperatury</button></div></section></div><section class="logs"><div class="logs-head"><h2>Logi</h2><div class="toolbar"><button id="refresh" title="Odśwież status">Odśwież</button><button id="clear" title="Wyczyść widok logów">Wyczyść widok</button></div></div><div id="message" role="status"></div><pre id="log" aria-label="Logi urządzenia"></pre></section></main><script>
+</style></head><body><header><div><h1>Sterownik LED</h1><div id="version" class="meta">Ladowanie...</div></div><div id="connection" class="meta">Laczenie</div></header><main><div class="summary"><section><h2>Sieć</h2><div id="wifi"></div></section><section><h2>MQTT</h2><div id="mqtt"></div></section><section><h2>System</h2><div id="system"></div></section></div><div class="grid"><section><h2>Kanały LED</h2><div id="channels" class="rows"></div></section><section><h2>Czujniki</h2><div id="sensors" class="rows"></div><div class="toolbar" style="margin-top:14px"><button id="wifi-scan" title="Skanuj sieci Wi-Fi">Skan Wi-Fi</button><button id="temp-scan" title="Skanuj magistralę 1-Wire">Skan temperatury</button></div></section></div><section class="logs"><h2>Diagnostyka stosow</h2><p class="meta">Minimum wolnego stosu od startu. Brak pomiaru nie oznacza OK. Zadania zdarzeniowe mierzone po operacji.</p><div id="stacks"></div></section><section class="logs"><div class="logs-head"><h2>Logi</h2><div class="toolbar"><button id="refresh" title="Odśwież status">Odśwież</button><button id="clear" title="Wyczyść widok logów">Wyczyść widok</button></div></div><div id="message" role="status"></div><pre id="log" aria-label="Logi urządzenia"></pre></section></main><script>
 const $=id=>document.getElementById(id);let cursor=0,busy=false;
 const value=(v,f='-')=>v===null||v===undefined||v===''?f:String(v);
 function metric(name,v){const d=document.createElement('div');d.className='metric';const a=document.createElement('span'),b=document.createElement('strong');a.textContent=name;b.textContent=value(v);d.append(a,b);return d}
@@ -94,6 +95,9 @@ $('connection').textContent=s.wifi.state==='connected'?'Połączono':'Brak poł�
 block('wifi',[['Stan',s.wifi.state],['SSID',s.wifi.ssid],['IPv4',s.wifi.ip],['Sygnał',s.wifi.rssi===null?'-':s.wifi.rssi+' dBm'],['NTP',s.wifi.time]]);
 block('mqtt',[['Stan',s.mqtt.state],['Broker',s.mqtt.uri],['Połączenia',s.mqtt.connect_count],['Komendy',s.mqtt.accepted+'/'+s.mqtt.rejected],['Birth',s.mqtt.birth_queued?'w kolejce':'oczekuje'],['Subskrypcje',s.mqtt.subscriptions_done+'/'+s.mqtt.subscriptions_total+(s.mqtt.subscriptions_ready?' OK':'')],['Discovery',s.mqtt.discovery_confirmed?'PUBACK':(s.mqtt.discovery_queued?'w kolejce':'oczekuje')],['JSON',s.mqtt.discovery_bytes+' B'],['Outbox',s.mqtt.outbox_bytes+' B'],['Blad sync',s.mqtt.sync_error],['Kolejka',s.mqtt.backlog?'oczekuje':'pusta']]);
 block('system',[['OTA',s.ota.state],['Postęp',s.ota.progress+'%'],['EEPROM',s.settings?s.settings.eeprom:'-'],['Rekord',s.settings?s.settings.record:'-']]);
+$('stacks').replaceChildren(...(s.stacks||[]).map(x=>{
+const d=document.createElement('div');d.className=x.level==='critical'?'bad':x.level==='warning'?'warn':'';
+d.textContent=x.task+': '+(x.measured?x.minimum+' B wolne / '+x.budget+' B, szczyt '+x.used_peak+' B; '+x.level+'; pomiar '+Math.max(0,s.uptime_s-x.sampled_at)+' s temu'+(x.finished?' (zakonczone)':''):'brak pomiaru');return d}));
 $('channels').replaceChildren(...s.channels.map((x,i)=>row('Kanał '+(i+1),x.on?x.brightness+'%':'OFF',x.on?x.brightness:0)));
 const sensor=[];s.pir.forEach((x,i)=>sensor.push(row('PIR '+(i+1),x?'ruch':'spokój',null)));
 if(s.ina){sensor.push(row('Prąd',s.ina.valid?s.ina.current_ma+' mA':'brak pomiaru',null));sensor.push(row('Napięcie',s.ina.valid?(s.ina.voltage_mv/1000).toFixed(2)+' V':'-',null));sensor.push(row('Moc',s.ina.valid?s.ina.power_mw+' mW':'-',null))}
@@ -419,6 +423,7 @@ void WebDiagnosticsService::setResponseHeaders(httpd_req_t* request) noexcept {
 }
 
 esp_err_t WebDiagnosticsService::page(httpd_req_t* request) {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::https, 12288);
     auto& service = *static_cast<WebDiagnosticsService*>(request->user_ctx);
     if (!service.authorized(request, true))
         return ESP_OK;
@@ -431,6 +436,7 @@ esp_err_t WebDiagnosticsService::page(httpd_req_t* request) {
 }
 
 esp_err_t WebDiagnosticsService::changePassword(httpd_req_t* request) {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::https, 12288);
     auto& service = *static_cast<WebDiagnosticsService*>(request->user_ctx);
     if (!service.authorized(request, true))
         return ESP_OK;
@@ -469,6 +475,7 @@ esp_err_t WebDiagnosticsService::changePassword(httpd_req_t* request) {
 }
 
 esp_err_t WebDiagnosticsService::status(httpd_req_t* request) {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::https, 12288);
     auto& service = *static_cast<WebDiagnosticsService*>(request->user_ctx);
     if (!service.authorized(request))
         return ESP_OK;
@@ -607,12 +614,47 @@ esp_err_t WebDiagnosticsService::status(httpd_req_t* request) {
     if (!ok || !cJSON_PrintPreallocated(root.get(), service.response_buffer_.data(),
                                         static_cast<int>(service.response_buffer_.size()), false))
         return unavailable(request, "Brak pamieci");
+    // Append bounded diagnostics without another cJSON tree or a large stack buffer.
+    auto& response = service.response_buffer_;
+    std::size_t used = std::strlen(response.data());
+    if (used == 0 || response[used - 1U] != '}')
+        return unavailable(request, "Blad JSON");
+    --used;
+    auto append = [&](const char* format, auto... args) {
+        const int count =
+            std::snprintf(response.data() + used, response.size() - used, format, args...);
+        if (count < 0 || static_cast<std::size_t>(count) >= response.size() - used)
+            return false;
+        used += static_cast<std::size_t>(count);
+        return true;
+    };
+    if (!append(",\"stacks\":["))
+        return unavailable(request, "Brak miejsca na diagnostyke");
+    for (unsigned i = 0; i < stack_monitor::kCount; ++i) {
+        const auto task = static_cast<stack_monitor::Task>(i);
+        stack_model::Record record{};
+        const bool measured = stack_monitor::read(task, record) && record.valid;
+        if (!append("%s{\"task\":\"%s\",\"level\":\"%s\",\"measured\":%s,\"finished\":%s,"
+                    "\"budget\":%lu,\"minimum\":%lu,\"used_peak\":%lu,\"sampled_at\":%lu,\"minimum_"
+                    "at\":%lu}",
+                    i ? "," : "", stack_monitor::name(task), stack_model::name(record.severity()),
+                    measured ? "true" : "false", record.finished ? "true" : "false",
+                    static_cast<unsigned long>(record.budget),
+                    static_cast<unsigned long>(record.minimum),
+                    static_cast<unsigned long>(measured ? record.budget - record.minimum : 0),
+                    static_cast<unsigned long>(record.sampled_at),
+                    static_cast<unsigned long>(record.minimum_at)))
+            return unavailable(request, "Brak miejsca na diagnostyke");
+    }
+    if (!append("]}"))
+        return unavailable(request, "Brak miejsca na diagnostyke");
     setResponseHeaders(request);
     httpd_resp_set_type(request, "application/json; charset=utf-8");
     return httpd_resp_send(request, service.response_buffer_.data(), HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t WebDiagnosticsService::logs(httpd_req_t* request) {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::https, 12288);
     auto& service = *static_cast<WebDiagnosticsService*>(request->user_ctx);
     if (!service.authorized(request))
         return ESP_OK;
@@ -661,6 +703,7 @@ esp_err_t WebDiagnosticsService::logs(httpd_req_t* request) {
 }
 
 esp_err_t WebDiagnosticsService::scanWifi(httpd_req_t* request) {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::https, 12288);
     auto& service = *static_cast<WebDiagnosticsService*>(request->user_ctx);
     if (!service.commandAuthorized(request))
         return ESP_OK;
@@ -672,6 +715,7 @@ esp_err_t WebDiagnosticsService::scanWifi(httpd_req_t* request) {
 }
 #if LED_CONTROLLER_DS18B20_ENABLED
 esp_err_t WebDiagnosticsService::scanTemperature(httpd_req_t* request) {
+    stack_monitor::Scope stack_sample(stack_monitor::Task::https, 12288);
     auto& service = *static_cast<WebDiagnosticsService*>(request->user_ctx);
     if (!service.commandAuthorized(request))
         return ESP_OK;
