@@ -1,0 +1,65 @@
+PUBLIKATOR OTA STEROWNIKA LED (wersja 2)
+======================================
+
+INSTALACJA
+1. Rozpakuj obydwa pliki oraz katalog scripts/ do katalogu projektu,
+   obok platformio.ini i CMakeLists.txt (nadpisz stare pliki publikatora).
+2. Wymagany Python 3.10+, Git for Windows, logowanie do GitHub przez
+   Git Credential Manager (do publikacji) oraz polaczenie z internetem.
+3. Projekt musi zawierac oryginalne skrypty: scripts/publish_ota.py,
+   scripts/ota_upload.py, scripts/release_artifact.py.
+4. Do OTA przez MQTT potrzebny jest lokalny secrets.ota.json.
+
+ZASADA WERSJONOWANIA
+Firmware ESP-IDF otrzymuje wersje z set(PROJECT_VER "...") w CMakeLists.txt.
+Nie ma osobnej stalej wersji w kodzie C++. ESP-IDF zapisuje ta wersje w
+naglowku pliku firmware.bin (esp_app_desc). Publikator weryfikuje zgodnosc.
+
+CODZIENNY SCHEMAT PRACY (DLA NOWEJ WERSJI)
+A. Uruchom Publikator_OTA.bat i wybierz [0].
+   Program odczyta PROJECT_VER, sprawdzi GitHub Releases,
+   zaproponuje nastepny numer (zwykle podniesienie PATCH) i pozwoli
+   wskazac inny numer. Dopiero po zatwierdzeniu zmieni CMakeLists.txt.
+   Odmowi wyboru wersji starszej lub rownej najwyzszej opublikowanej.
+B. W VS Code zrob BUILD w profilu esp32doit-devkit-v1-ota.
+   Nie uzywaj Upload, bo uruchamia zdalne OTA.
+C. Wykonaj Git Commit + Push zmian zrodel (w tym CMakeLists.txt)
+   do galezi main. Wydanie wymaga czystego repo i origin/main=HEAD.
+   Jezeli skopiowales nowy publikator, dodaj do Git jego pliki i zacommituj.
+   Nigdy nie dodawaj do Git plikow secrets.ota.json ani hasel.
+D. Uruchom Publikator_OTA.bat i wybierz [1] lub [2].
+   Publikator nie kompiluje ani nie zmienia juz PROJECT_VER.
+   Weryfikuje czy firmware.bin powstal po przygotowaniu wersji,
+   czy wersja w binarnym obrazie odpowiada CMakeLists.txt,
+   czy commit jest wypchniety oraz czy SHA256 zgadza sie z wydaniem.
+   Zbuduje release.json i SHA256SUMS, wysle je wraz z firmware.bin,
+   zweryfikuje publiczne wydanie i wypchnie tag do repo zrodel.
+
+OPCJE MENU
+[0] Przygotowanie nowej wersji: tylko edycja CMakeLists.txt i znacznik
+    w .pio/publikator_przygotowana_wersja.json. Wymaga internetu do
+    sprawdzenia GitHub Releases. Nie robi Build.
+[1] Opublikuj juz zbudowane firmware jako GitHub Release; bez OTA.
+[2] Jak [1] + wyslij polecenie OTA przez MQTT i potwierdz instalacje.
+[3] Ponow probe OTA istniejącego Release, bez kompilacji i publikacji.
+[4] Zapisz w .pio/release/ gotowy YAML z akcja mqtt.publish dla HA.
+[5] Wyjscie.
+
+WAZNE
+- Nie zmieniaj PROJECT_VER po kompilacji - wtedy bin i zrodla rozjadą sie.
+- Mozesz wybrac inną wersję (np. 0.11.0) w opcji [0].
+- Gdy juz masz w CMake wersje wyzsza od najwyzszego Release, [0]
+  domyslnie pozostawi ja bez zmian, ale wymaga kolejnego Build.
+- Przy braku GitHub / internetu [0] przerwie prace BEZ edycji CMakeLists.txt.
+- Jesli nowa wersja zostala juz przygotowana, a Build byl wczesniejszy,
+  publikacja zostanie wstrzymana. Wykonaj ponownie Build.
+- Istniejacy Release nie jest nadpisywany innym plikiem.
+- Numer wersji w komentarzach, dokumentacji lub plikach planow nie
+  jest wersja aplikacji: odczytywany jest PROJECT_VER w CMakeLists.txt.
+- Ten program nie wysyla secrets.ota.json do GitHuba.
+
+DODATKOWO Z TERMINALA (bez menu; przejdź do katalogu projektu):
+  py -3 scripts/publikator_z_build.py prepare-version --yes
+  py -3 scripts/publikator_z_build.py prepare-version --version 0.11.0 --yes
+  py -3 scripts/publikator_z_build.py publish-only
+  py -3 scripts/publikator_z_build.py publish-install
