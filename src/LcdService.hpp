@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FeatureConfig.hpp"
+#include "HardwareDiagnostics.hpp"
 #if LED_CONTROLLER_DS1307_NVRAM_ENABLED
 #include "Ds1307Nvram.hpp"
 #endif
@@ -47,6 +48,7 @@ class LcdService final {
         std::uint32_t local_config_revision{0};
     };
 
+    bool tryGetHardwareDiagnostics(HardwareDiagnostics& output) const noexcept;
     esp_err_t initialize() noexcept;
 #if LED_CONTROLLER_DS1307_NVRAM_ENABLED
     void attachLocalController(LedController& controller) noexcept;
@@ -94,6 +96,10 @@ class LcdService final {
     void markIna228Unavailable(esp_err_t error, bool present) noexcept;
 #endif
 
+    void publishHardwareDiagnostics() noexcept;
+    HardwareDiagnostics hardware_{};
+    HardwareDiagnostics published_hardware_{};
+    mutable std::atomic_flag hardware_busy_ = ATOMIC_FLAG_INIT;
     I2cBus bus_;
 #if LED_CONTROLLER_DS1307_NVRAM_ENABLED
     Ds1307Nvram nvram_;

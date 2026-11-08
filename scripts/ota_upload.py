@@ -33,6 +33,10 @@ class OtaUploadError(RuntimeError):
     pass
 
 
+class MqttUnavailableError(OtaUploadError):
+    """Broker TCP endpoint is unreachable; publication can still succeed."""
+
+
 def require_string(config: Dict[str, Any], key: str, allow_empty: bool = False) -> str:
     value = config.get(key)
     if not isinstance(value, str) or (not allow_empty and not value.strip()):
@@ -265,7 +269,7 @@ class MinimalMqttClient:
             else:
                 self.sock = raw_socket
         except OSError as error:
-            raise OtaUploadError("Polaczenie z brokerem MQTT nie powiodlo sie: %s" % error) from error
+            raise MqttUnavailableError("Broker MQTT nieosiagalny") from error
 
         client_id = "pio-ota-%d-%s" % (os.getpid(), secrets.token_hex(3))
         flags = 0x02
@@ -422,7 +426,7 @@ def decode_status(payload: bytes) -> Optional[Dict[str, Any]]:
     return status if isinstance(status, dict) else None
 
 
-def run_ota(config: Dict[str, Any], url: str, candidate_version: str) -> None:
+def run_ota(config: Dict[str, Any], url: str, candidate_version: str, allow_offline: bool = False) -> None:
     prefix = require_string(config, "topic_prefix").strip("/")
     device_id = require_string(config, "device_id")
     if not prefix or any(character in prefix for character in "+#"):
@@ -437,7 +441,13 @@ def run_ota(config: Dict[str, Any], url: str, candidate_version: str) -> None:
     status_topic = "%s/%s/ota/status" % (prefix, device_id)
     client = MinimalMqttClient(config)
     try:
-        client.connect()
+        try:
+            client.connect()
+        except MqttUnavailableError:
+            if not allow_offline:
+                raise
+            print('OTA: OPUBLIKOWANO; broker nieosiagalny. Instalacja odroczona do auto-OTA sterownika.')
+            return
         client.subscribe(status_topic, 1)
 
         # Remove the retained status observed before issuing this particular command.

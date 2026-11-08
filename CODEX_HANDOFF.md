@@ -1,3 +1,8 @@
+## 2026-11-08: 0.10.5 diagnostyka I2C (lokalna)
+
+Dodano migawke LCD/DS1307 w WWW i log co 30 s. Szczegoly oraz testy HIL:
+`docs/HARDWARE_DIAGNOSTICS_0.10.5.md`. Bez publikacji i bez flashowania.
+
 # Handoff dla Codex
 
 ## 2026-10-27 - robocza wersja 0.10.4

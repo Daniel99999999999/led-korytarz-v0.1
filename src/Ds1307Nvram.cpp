@@ -3,6 +3,7 @@
 #include "BoardConfig.hpp"
 #include "LedController.hpp"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <algorithm>
 #include <type_traits>
@@ -21,8 +22,10 @@ esp_err_t Ds1307Nvram::write(const std::uint8_t address, const std::uint8_t* con
     std::array<std::uint8_t, 29> buffer{};
     buffer[0] = address;
     std::copy_n(data, size, buffer.begin() + 1);
-    return i2c_master_transmit(device_, buffer.data(), size + 1U,
-                               board_config::kSharedI2cTimeoutMs);
+    const auto result =
+        i2c_master_transmit(device_, buffer.data(), size + 1U, board_config::kSharedI2cTimeoutMs);
+    diagnostics_.io.record(result, io_seconds_);
+    return result;
 }
 
 esp_err_t Ds1307Nvram::read(const std::uint8_t address, std::uint8_t* const data,
@@ -30,13 +33,37 @@ esp_err_t Ds1307Nvram::read(const std::uint8_t address, std::uint8_t* const data
     if (address < 0x08U || address >= 0x40U || size == 0U || size > 0x40U - address) {
         return ESP_ERR_INVALID_ARG;
     }
-    return i2c_master_transmit_receive(device_, &address, 1, data, size,
-                                       board_config::kSharedI2cTimeoutMs);
+    const auto result = i2c_master_transmit_receive(device_, &address, 1, data, size,
+                                                    board_config::kSharedI2cTimeoutMs);
+    diagnostics_.io.record(result, io_seconds_);
+    return result;
 }
 
-esp_err_t Ds1307Nvram::service(const i2c_master_bus_handle_t bus, LedController& controller,
-                               const local_control::Config& config, const std::uint32_t revision,
-                               const TickType_t now) noexcept {
+esp_err_t Ds1307Nvram::service(i2c_master_bus_handle_t bus, LedController& controller,
+                               const local_control::Config& config, std::uint32_t revision,
+                               TickType_t now) noexcept {
+    io_seconds_ = static_cast<std::uint32_t>(esp_timer_get_time() / 1000000);
+    const auto before = diagnostics_.io.attempts;
+    const auto result = serviceStep(bus, controller, config, revision, now);
+    diagnostics_.enabled = true;
+    if (result != ESP_OK || diagnostics_.io.attempts != before)
+        diagnostics_.last_error = result;
+    diagnostics_.record_valid = stored_valid_;
+    diagnostics_.runtime_matches = stored_valid_ && local_control::equal(stored_, config);
+    diagnostics_.save_pending = revision != 0U && !diagnostics_.runtime_matches;
+    diagnostics_.retry_pending = retry_pending_;
+    diagnostics_.phase = static_cast<unsigned>(phase_);
+    diagnostics_.sequence = sequence_;
+    diagnostics_.slot = active_slot_;
+    diagnostics_.runtime_revision = revision;
+    diagnostics_.ram_key1 = config.button_masks[0];
+    diagnostics_.saved_key1 = stored_valid_ ? stored_.button_masks[0] : 0;
+    return result;
+}
+
+esp_err_t Ds1307Nvram::serviceStep(const i2c_master_bus_handle_t bus, LedController& controller,
+                                   const local_control::Config& config,
+                                   const std::uint32_t revision, const TickType_t now) noexcept {
     using SignedTick = std::make_signed_t<TickType_t>;
     if (observed_revision_ != revision) {
         observed_revision_ = revision;
@@ -89,6 +116,10 @@ esp_err_t Ds1307Nvram::service(const i2c_master_bus_handle_t bus, LedController&
         command.kind = ControlCommand::Kind::restore_local_config;
         command.local_config = stored_;
         if (controller.enqueueCommand(command) == ESP_OK) {
+            diagnostics_.restore_queued = true;
+            ESP_LOGI(kTag, "NVRAM: odtworzenie zlecone, KEY1 mask=%u, seq=%lu",
+                     static_cast<unsigned>(stored_.button_masks[0]),
+                     static_cast<unsigned long>(sequence_));
             phase_ = Phase::idle;
         }
         break;
@@ -130,6 +161,7 @@ esp_err_t Ds1307Nvram::service(const i2c_master_bus_handle_t bus, LedController&
             result = ESP_ERR_INVALID_CRC;
         }
         if (result == ESP_OK) {
+            ++diagnostics_.saves;
             stored_ = saving_;
             stored_valid_ = true;
             ++sequence_;

@@ -37,6 +37,9 @@ class LedController final {
     void attachLocalOta(LocalOtaService& service) noexcept {
         local_ota_ = &service;
     }
+    bool tryGetHardwareDiagnostics(HardwareDiagnostics& output) const noexcept {
+        return lcd_service_.tryGetHardwareDiagnostics(output);
+    }
     esp_err_t initialize() noexcept;
     esp_err_t start() noexcept;
     esp_err_t attachMqttService(MqttService* mqtt_service) noexcept;

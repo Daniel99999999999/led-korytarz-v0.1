@@ -144,3 +144,10 @@ encji Discovery. Pomiar i eksport nie wymagaja wlaczenia debug MQTT.
 Powiadomienie push realizuje blueprint HA z jawnym wyborem telefonu Daniela
 oraz pomocnikiem deduplikacji. Konfiguracja w HA i HIL pozostaja do wykonania.
 Szczegoly i ograniczenia: [STACK_MONITOR_0.10.4.md](STACK_MONITOR_0.10.4.md).
+
+## Diagnostyka I2C 0.10.5
+
+LcdService publikuje migawke HardwareDiagnostics co sekunde. Dostep chroni
+nieblokujacy atomic_flag; HTTP przy zajetej migawce zwraca brak pomiaru.
+HTTP nie skanuje I2C. Ds1307Nvram raportuje rzeczywiste operacje, stan rekordu
+i potwierdzone odczytem zapisy. Szczegoly: HARDWARE_DIAGNOSTICS_0.10.5.md.

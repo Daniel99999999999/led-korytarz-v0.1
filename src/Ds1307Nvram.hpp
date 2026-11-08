@@ -1,5 +1,6 @@
 #pragma once
 
+#include "HardwareDiagnostics.hpp"
 #include "LocalConfigRecord.hpp"
 #include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
@@ -13,7 +14,16 @@ class Ds1307Nvram final {
                       const local_control::Config& config, std::uint32_t revision,
                       TickType_t now) noexcept;
 
+    const NvramDiagnostics& diagnostics() const noexcept {
+        return diagnostics_;
+    }
+
   private:
+    esp_err_t serviceStep(i2c_master_bus_handle_t bus, LedController& controller,
+                          const local_control::Config& config, std::uint32_t revision,
+                          TickType_t now) noexcept;
+    NvramDiagnostics diagnostics_{};
+    std::uint32_t io_seconds_{0};
     enum class Phase : std::uint8_t { load, restore, idle, invalidate, write, commit, verify };
     esp_err_t write(std::uint8_t address, const std::uint8_t* data, std::size_t size) noexcept;
     esp_err_t read(std::uint8_t address, std::uint8_t* data, std::size_t size) noexcept;

@@ -6,6 +6,7 @@
 #include "Ina228Scaling.hpp"
 #endif
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <algorithm>
 #include <limits>
@@ -168,8 +169,33 @@ void LcdService::taskEntry(void* const context) noexcept {
     service->taskLoop();
 }
 
+bool LcdService::tryGetHardwareDiagnostics(HardwareDiagnostics& output) const noexcept {
+    if (hardware_busy_.test_and_set(std::memory_order_acquire))
+        return false;
+    output = published_hardware_;
+    hardware_busy_.clear(std::memory_order_release);
+    return true;
+}
+void LcdService::publishHardwareDiagnostics() noexcept {
+    hardware_.sampled = true;
+    hardware_.bus_initialized = bus_.isInitialized();
+    hardware_.lcd_ready = display_.isReady();
+    hardware_.backlight = display_.isBacklightOn();
+    hardware_.sampled_at = static_cast<std::uint32_t>(esp_timer_get_time() / 1000000);
+#if LED_CONTROLLER_DS1307_NVRAM_ENABLED
+    hardware_.nvram = nvram_.diagnostics();
+    hardware_.nvram.enabled = true;
+#endif
+    if (hardware_busy_.test_and_set(std::memory_order_acquire))
+        return;
+    published_hardware_ = hardware_;
+    hardware_busy_.clear(std::memory_order_release);
+}
+
 [[noreturn]] void LcdService::taskLoop() noexcept {
     TickType_t next_wake = xTaskGetTickCount();
+    TickType_t diagnostics_at = next_wake;
+    TickType_t diagnostics_log_at = next_wake;
     const TickType_t interval = pdMS_TO_TICKS(kTaskPeriodMs);
     const TickType_t recovery_interval = pdMS_TO_TICKS(board_config::kLcdRecoveryRetryIntervalMs);
     const TickType_t recovery_frame_interval =
@@ -212,6 +238,9 @@ void LcdService::taskEntry(void* const context) noexcept {
          &display_recovery_active, &display_absence_reported, &recovery_frames_written,
          &recovery_frame_waiting, &snapshot_available, &snapshot_dirty](
             const char* const operation, const esp_err_t error, const TickType_t now) noexcept {
+            hardware_.lcd_error = error;
+            hardware_.ddram_checked = false;
+            ++hardware_.lcd_retries;
             const bool endpoint_unavailable =
                 (error == ESP_ERR_NOT_FOUND) || (error == ESP_ERR_INVALID_RESPONSE);
             if (endpoint_unavailable) {
@@ -250,10 +279,14 @@ void LcdService::taskEntry(void* const context) noexcept {
         bool present = false;
         esp_err_t start_result = display_.probe(bus_.handle(), present);
         if (start_result != ESP_OK) {
+            hardware_.lcd_io.record(start_result,
+                                    static_cast<std::uint32_t>(esp_timer_get_time() / 1000000));
             schedule_display_retry("sondowanie PCF8574AT", start_result, now);
             return;
         }
         reportBusRecovery();
+        hardware_.lcd_io.record(present ? ESP_OK : ESP_ERR_NOT_FOUND,
+                                static_cast<std::uint32_t>(esp_timer_get_time() / 1000000));
         if (!present) {
             schedule_display_retry("sondowanie PCF8574AT", ESP_ERR_NOT_FOUND, now);
             return;
@@ -435,6 +468,13 @@ void LcdService::taskEntry(void* const context) noexcept {
                                                    information_page, latest_snapshot.notice,
                                                    latest_snapshot.measurement, measurement_page);
                     result = display_.show(lines);
+                    hardware_.lcd_io.record(
+                        result, static_cast<std::uint32_t>(esp_timer_get_time() / 1000000));
+                    if (result == ESP_OK) {
+                        ++hardware_.frames;
+                        hardware_.last_frame_s = hardware_.lcd_io.last_io_s;
+                        hardware_.lcd_error = ESP_OK;
+                    }
                     failed_operation = "odswiezenie ekranu";
                     if (result == ESP_OK) {
                         reportBusRecovery();
@@ -465,6 +505,13 @@ void LcdService::taskEntry(void* const context) noexcept {
                 if (result == ESP_OK && !display_recovery_active &&
                     (now - verification_started_at) >= verification_interval) {
                     result = display_.verifyNextCharacter();
+                    hardware_.ddram_checked = true;
+                    hardware_.ddram_error = result;
+                    ++hardware_.checks;
+                    if (result == ESP_ERR_INVALID_CRC)
+                        ++hardware_.mismatches;
+                    hardware_.last_check_s =
+                        static_cast<std::uint32_t>(esp_timer_get_time() / 1000000);
                     failed_operation = "weryfikacja DDRAM LCD";
                     verification_started_at = now;
                     verification_interval = pdMS_TO_TICKS(result == ESP_OK ? 125 : 10'000);
@@ -477,6 +524,26 @@ void LcdService::taskEntry(void* const context) noexcept {
             }
         }
 
+        if (!hardware_.sampled || now - diagnostics_at >= pdMS_TO_TICKS(1000)) {
+            publishHardwareDiagnostics();
+            diagnostics_at = now;
+        }
+        if (now - diagnostics_log_at >= pdMS_TO_TICKS(30000)) {
+            diagnostics_log_at = now;
+            ESP_LOGI(kTag,
+                     "I2C status: bus=%u LCD ready=%u frames=%lu mismatch=%lu error=%s; "
+                     "DS1307 enabled=%u io=%u/%u record=%u match=%u pending=%u saves=%lu "
+                     "KEY1 RAM=%u NVRAM=%u error=%s",
+                     hardware_.bus_initialized, hardware_.lcd_ready,
+                     static_cast<unsigned long>(hardware_.frames),
+                     static_cast<unsigned long>(hardware_.mismatches),
+                     esp_err_to_name(hardware_.lcd_error), hardware_.nvram.enabled,
+                     hardware_.nvram.io.attempted, hardware_.nvram.io.responding,
+                     hardware_.nvram.record_valid, hardware_.nvram.runtime_matches,
+                     hardware_.nvram.save_pending,
+                     static_cast<unsigned long>(hardware_.nvram.saves), hardware_.nvram.ram_key1,
+                     hardware_.nvram.saved_key1, esp_err_to_name(hardware_.nvram.last_error));
+        }
         xTaskDelayUntil(&next_wake, interval);
     }
 }
@@ -502,6 +569,8 @@ void LcdService::recoverSharedBusAfterTimeout(const char* const operation,
     reportFault(operation, error, true);
     if (bus_.isInitialized()) {
         const esp_err_t recovery_result = bus_.recover();
+        ++hardware_.bus_recoveries;
+        hardware_.bus_recovery_error = recovery_result;
         if (recovery_result != ESP_OK) {
             reportFault("reset kontrolera wspolnej magistrali I2C", recovery_result, true);
         }

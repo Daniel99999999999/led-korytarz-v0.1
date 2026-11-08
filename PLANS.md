@@ -1,5 +1,20 @@
 # Execution Plans
 
+## 2026-11-08 - Upload GitHub i autonomiczne OTA (0.10.5)
+
+- [ ] Scalanie publikatorow, Upload OTA publikuje; Build bez efektow sieciowych.
+- [ ] Polling stabilnego manifestu HTTPS, walidacja wersji/hash/rollback, status WWW.
+- [ ] Testy publikatora i polityki OTA, build, dokumentacja i testy HIL do wykonania.
+
+
+## 2026-11-08 - 0.10.5 diagnostyka LCD/I2C/NVRAM
+
+- [x] Audyt sciezki zapisu DS1307 i odczyt kontraktow.
+- [x] Status runtime LCD/DS1307 oraz bledy EEPROM/INA228 w WWW.
+- [x] Log podsumowania, dokumentacja; check.sh PASS, UTF-8 PASS, diff --check PASS. Bez publikacji/OTA.
+- [ ] HIL: pusty LCD i utrata KEY1 po resecie przy stalym zasilaniu.
+
+
 ## 2026-10-27 - 0.10.4 diagnostyka stosu
 
 - [x] Kontrola bazowa check.sh PASS.
