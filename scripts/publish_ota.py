@@ -181,7 +181,7 @@ def publish_release(tag: str, commit: str, assets_dir: Path, config: Dict[str, A
         print("OTA: wyslano %s (%u B)" % (name, source.stat().st_size))
     github_request(
         "PATCH", API_ROOT + "/releases/%u" % release["id"], token,
-        json.dumps({"draft": False}).encode("utf-8"),
+        json.dumps({"draft": False, "make_latest": "true"}).encode("utf-8"),
     )
     print("OTA: wydanie %s jest publiczne" % tag)
     for attempt in range(5):
@@ -243,7 +243,7 @@ def newest_published_version() -> str | None:
         raise OtaUploadError('GitHub ma >=100 wydan; lista jest niepelna. Bez zmian.')
     versions = []
     for release in releases:
-        if not isinstance(release, dict) or release.get('draft'):
+        if not isinstance(release, dict) or release.get('draft') or release.get('prerelease'):
             continue
         match = TAG_SEMVER.fullmatch(str(release.get('tag_name', '')))
         if match:
@@ -341,7 +341,6 @@ def main() -> int:
         raise OtaUploadError("Nie znaleziono jednej wersji PROJECT_VER")
     version = validate_source_version("v" + versions[0], ROOT / "CMakeLists.txt")
     tag = "v" + version
-    commit = check_source(tag)
     config = {'firmware_repo': RELEASE_REPO, 'artifact_source': 'release', 'publish_path': None}
     if args.install_only:
         config = load_ota_config(ROOT / 'secrets.ota.json', args.mqtt_host)
@@ -349,6 +348,7 @@ def main() -> int:
         run_ota(config, url, version)
         return 0
 
+    commit = check_source(tag)
     image_path = ROOT / '.pio' / 'build' / OTA_PROFILE / 'firmware.bin'
     if args.image is None:
         pio = shutil.which('pio') or str(Path(sys.executable).with_name('platformio.exe'))

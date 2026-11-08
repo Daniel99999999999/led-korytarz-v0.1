@@ -130,11 +130,12 @@ class ReleaseArtifactTests(unittest.TestCase):
         config = {"firmware_repo": publish_ota.RELEASE_REPO, "artifact_source": "release"}
         with mock.patch.object(publish_ota, "github_credential", return_value="token"), \
              mock.patch.object(publish_ota, "github_request", return_value={"draft": False}) as api, \
-             mock.patch.object(publish_ota, "verify_published_release", return_value="url"):
+             mock.patch.object(publish_ota, "verify_published_release", return_value="url"),              mock.patch.object(Path, "read_text", return_value='{"sha256":"hash","size":512}'),              mock.patch.object(publish_ota, "verify_remote_artifact") as verify_bytes:
             self.assertEqual(
                 publish_ota.publish_release("v0.10.3", "a" * 40, Path("unused"), config),
                 "url",
             )
+        verify_bytes.assert_called_once_with("url", "hash", 512)
         self.assertEqual(api.call_count, 1)
         self.assertEqual(api.call_args.args[0], "GET")
 
@@ -147,6 +148,55 @@ class ReleaseArtifactTests(unittest.TestCase):
         ):
             with self.assertRaises(ota_upload.OtaUploadError):
                 publish_ota.verify_published_release("v0.10.1", "b" * 40, config)
+
+
+class PublicationFlowTests(unittest.TestCase):
+    def test_upload_uses_image_without_recursive_build_and_publishes_offline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'CMakeLists.txt').write_text('set(PROJECT_VER "0.10.5")\n', encoding='utf-8')
+            image = root / '.pio/build/esp32doit-devkit-v1-ota/firmware.bin'
+            image.parent.mkdir(parents=True)
+            image.write_bytes(sample_image('0.10.5'))
+            with mock.patch.object(publish_ota, 'ROOT', root), \
+                 mock.patch.object(publish_ota.sys, 'argv', ['publish_ota.py', '--image', str(image)]), \
+                 mock.patch.object(publish_ota, 'check_source', return_value='a' * 40), \
+                 mock.patch.object(publish_ota, 'publish_release', return_value='url') as publish, \
+                 mock.patch.object(publish_ota, 'push_tag') as tag, \
+                 mock.patch.object(publish_ota.subprocess, 'run') as build, \
+                 mock.patch.object(publish_ota, 'run_ota') as ota:
+                self.assertEqual(0, publish_ota.main())
+                build.assert_not_called()
+                publish.assert_called_once()
+                tag.assert_called_once_with('v0.10.5', 'a' * 40)
+                ota.assert_not_called()
+                self.assertTrue((root / '.pio/release/release.json').is_file())
+
+    def test_broker_unreachable_is_deferred_only_when_requested(self):
+        config = {'topic_prefix': 'test', 'device_id': 'test'}
+        with mock.patch.object(ota_upload, 'MinimalMqttClient') as factory:
+            client = factory.return_value
+            client.connect.side_effect = ota_upload.MqttUnavailableError('offline')
+            ota_upload.run_ota(config, 'https://example.com/firmware.bin', '0.10.5', allow_offline=True)
+            client.publish_qos1.assert_not_called()
+            client.close.assert_called_once()
+            with self.assertRaises(ota_upload.MqttUnavailableError):
+                ota_upload.run_ota(config, 'https://example.com/firmware.bin', '0.10.5')
+
+    def test_authentication_failure_is_not_silently_deferred(self):
+        config = {'topic_prefix': 'test', 'device_id': 'test'}
+        with mock.patch.object(ota_upload, 'MinimalMqttClient') as factory:
+            factory.return_value.connect.side_effect = ota_upload.OtaUploadError('CONNACK 5')
+            with self.assertRaises(ota_upload.OtaUploadError):
+                ota_upload.run_ota(config, 'https://example.com/firmware.bin', '0.10.5', allow_offline=True)
+
+    def test_source_not_pushed_prevents_publication(self):
+        with mock.patch.object(publish_ota.sys, 'argv', ['publish_ota.py']), \
+             mock.patch.object(publish_ota, 'check_source', side_effect=ota_upload.OtaUploadError('push required')), \
+             mock.patch.object(publish_ota, 'publish_release') as publish:
+            with self.assertRaises(ota_upload.OtaUploadError):
+                publish_ota.main()
+            publish.assert_not_called()
 
 
 if __name__ == "__main__":

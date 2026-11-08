@@ -15,6 +15,7 @@ set(component_sources
         "StackMonitor.cpp"
         "DebugDiscovery.cpp"
         "OtaService.cpp"
+        "AutoOtaModel.cpp"
         "LocalOtaService.cpp"
         "PirInput.cpp"
         "I2cBus.cpp"
@@ -41,6 +42,8 @@ set(component_private_requires
         esp_netif
         esp_http_server
         esp_https_ota
+        esp_http_client
+        espressif__cjson
         esp_partition
         esp_system
         esp_wifi

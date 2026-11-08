@@ -263,13 +263,17 @@ class MinimalMqttClient:
     def connect(self) -> None:
         try:
             raw_socket = socket.create_connection((self.host, self.port), timeout=10)
+        except OSError as error:
+            raise MqttUnavailableError("Broker MQTT nieosiagalny") from error
+        try:
             if self.use_tls:
                 context = ssl.create_default_context(cafile=self.ca_file)
                 self.sock = context.wrap_socket(raw_socket, server_hostname=self.host)
             else:
                 self.sock = raw_socket
         except OSError as error:
-            raise MqttUnavailableError("Broker MQTT nieosiagalny") from error
+            raw_socket.close()
+            raise OtaUploadError("Blad TLS brokera MQTT; sprawdz CA i konfiguracje") from error
 
         client_id = "pio-ota-%d-%s" % (os.getpid(), secrets.token_hex(3))
         flags = 0x02

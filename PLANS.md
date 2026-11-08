@@ -1,6 +1,6 @@
 # Execution Plans
 
-## 2026-11-08 - Upload GitHub i autonomiczne OTA (0.10.5)
+## 2026-11-08 - Upload GitHub i autonomiczne OTA (0.10.6)
 
 - [ ] Scalanie publikatorow, Upload OTA publikuje; Build bez efektow sieciowych.
 - [ ] Polling stabilnego manifestu HTTPS, walidacja wersji/hash/rollback, status WWW.

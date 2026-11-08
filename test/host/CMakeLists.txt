@@ -18,6 +18,7 @@ add_executable(
     led_controller_host_tests
     "test_main.cpp"
     "${PROJECT_ROOT}/src/ButtonDebouncer.cpp"
+    "${PROJECT_ROOT}/src/AutoOtaModel.cpp"
     "${PROJECT_ROOT}/src/ButtonGesture.cpp"
     "${PROJECT_ROOT}/src/ChannelState.cpp"
     "${PROJECT_ROOT}/src/LocalControlConfig.cpp"

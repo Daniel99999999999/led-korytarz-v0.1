@@ -57,7 +57,7 @@ extern "C" void app_main() {
 
     static WifiService wifi_service;
     static LedController controller(&wifi_service);
-    static OtaService ota_service;
+    static OtaService ota_service(wifi_service);
     static LocalOtaService local_ota(ota_service);
     controller.attachLocalOta(local_ota);
     static MqttService mqtt_service(controller, ota_service, wifi_service);

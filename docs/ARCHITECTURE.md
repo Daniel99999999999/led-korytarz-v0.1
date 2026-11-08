@@ -151,3 +151,16 @@ LcdService publikuje migawke HardwareDiagnostics co sekunde. Dostep chroni
 nieblokujacy atomic_flag; HTTP przy zajetej migawce zwraca brak pomiaru.
 HTTP nie skanuje I2C. Ds1307Nvram raportuje rzeczywiste operacje, stan rekordu
 i potwierdzone odczytem zapisy. Szczegoly: HARDWARE_DIAGNOSTICS_0.10.5.md.
+
+## Autonomiczne OTA 0.10.6
+
+OtaService korzysta z dotychczasowego zadania i blokady request_in_flight dla
+komend MQTT, lokalnego transferu oraz sprawdzania GitHub. WifiService jest
+przekazywany referencja przed startem; gotowosc sieci jest atomowa.
+Manifest ma limit 2048 B i plaski JSON bez rekurencji przed parserem cJSON.
+Bufor manifestu nalezy do OtaService (poza stosem), bez nowego zadania RTOS.
+HTTP pobiera najwyzej limit+1 B, wymaga statusu 200, pelnej odpowiedzi,
+HTTPS przy przekierowaniach i najwyzej 5 przekierowan.
+Weryfikacja SHA-256 czyta nieaktywna partycje blokami 512 B przed finish.
+Nie zmieniono priorytetu ani stosu OTA; wymaga ponownego pomiaru HWM na ESP32.
+Interwaly, ograniczenia i testy: AUTO_OTA_0.10.6.md.

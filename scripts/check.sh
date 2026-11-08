@@ -72,7 +72,7 @@ if ! grep -q '^\[env:esp32doit-devkit-v1-ota\]$' platformio.ini || \
     ! grep -Eq '^extends[[:space:]]*=[[:space:]]*env:esp32doit-devkit-v1$' platformio.ini || \
     ! grep -Eq '^custom_sdkconfig_source[[:space:]]*=[[:space:]]*sdkconfig\.esp32doit-devkit-v1$' \
         platformio.ini || \
-    ! grep -q 'scripts/ota_upload.py' platformio.ini || \
+    ! grep -q 'scripts/publish_ota.py.*--image' platformio.ini || \
     ! grep -q '^secrets\.\*$' .gitignore; then
     echo "ERROR: Profil OTA musi uzywac pelnego bazowego sdkconfig i ignorowanych sekretow." >&2
     exit 1
@@ -171,7 +171,8 @@ if grep -Eq 'mqtt_service_->status\(' src/LedController.cpp; then
     exit 1
 fi
 
-if grep -ERiq 'led[_-]korytarz|CorridorController|corridor_control|Projekt lokalny' src; then
+# The public OTA repository URL is infrastructure, not the device identity.
+if grep -ERi 'led[_-]korytarz|CorridorController|corridor_control|Projekt lokalny' src | grep -Fv 'https://github.com/Daniel99999999999/led-korytarz-firmware/releases'; then
     echo "ERROR: Firmware nie moze zawierac starej tozsamosci ani kodu migracyjnego." >&2
     exit 1
 fi

@@ -1,102 +1,24 @@
 # GitHub i VS Code
 
-Repozytorium kodu: https://github.com/Daniel99999999999/led-korytarz-v0.1
-Repozytorium publicznych wydań OTA: https://github.com/Daniel99999999999/led-korytarz-firmware
-Lokalna gałąź: main. Rozszerzenie: GitHub Pull Requests (GitHub.vscode-pull-request-github).
+Kod: prywatne repozytorium Daniel99999999999/led-korytarz-v0.1.
+Firmware: publiczne Daniel99999999999/led-korytarz-firmware.
 
-## Pierwsza publikacja
+Source Control: Commit zapisuje zmiany lokalnie, Push wysyla je na GitHub,
+Pull pobiera zmiany z GitHub. Te operacje same nie wgrywaja firmware.
+Wtyczka GitHub Pull Requests jest przydatna do PR; podstawowe operacje Git sa
+wbudowane w VS Code. Publikator korzysta z logowania Git Credential Manager.
 
-W VS Code: Ctrl+Shift+P -> Publish to GitHub. Zaloguj się w przeglądarce,
-wybierz swoje konto i Publish to GitHub private repository, nazwa led-korytarz.
-Jeśli VS Code poprosi o autora commitów, podaj własną nazwę i adres e-mail
-(można użyć adresu noreply z ustawień konta GitHub).
-Nie dodawaj secrets.ota.json ani plików .pio. Nie udostępniaj tokenu w czacie.
+Od 0.10.6 Upload profilu `esp32doit-devkit-v1-ota` buduje, publikuje Release
+oraz zleca OTA przez MQTT, jezeli broker jest osiagalny. Build nie publikuje.
+Przed Upload potrzebne sa nowy numer PROJECT_VER, Commit i Push na main.
+Sekrety MQTT pozostaja tylko w ignorowanym secrets.ota.json; do samej publikacji
+nie sa wymagane. Nie umieszczaj tokenu GitHub na ESP32.
 
-## Dalsza praca
+Instrukcja i interwaly automatyki: [AUTO_OTA_0.10.6.md](AUTO_OTA_0.10.6.md).
+Lista skryptow: [scripts/README.md](../scripts/README.md).
 
-Kontrola źródła: przejrzyj zmiany, wpisz opis, Commit, następnie Sync Changes / Push.
-Na drugim komputerze: Git: Clone, wybierz repozytorium, otwórz lokalny katalog
-oraz zainstaluj rekomendowane rozszerzenia. Najpierw zbuduj profil bazowy PlatformIO.
-Lokalny secrets.ota.json należy odtworzyć osobno.
-
-W Git przechowujemy sdkconfig.esp32doit-devkit-v1: zawiera aktualny zestaw funkcji,
-który różni się od fabrycznych sdkconfig.defaults. To nie jest kopia NVS ani EEPROM.
-
-## OTA
-
-Jednym lokalnym poleceniem po commit i push mozna przygotowac wydanie i
-uruchomic OTA: `python scripts/publish_ota.py --mqtt-host 192.168.1.130`.
-Skrypt uzywa istniejacego logowania Git Credential Manager; nie kopiuje
-jego tokenu do Actions. Sam bierze PROJECT_VER, pakuje firmware.bin,
-release.json i SHA256SUMS, publikuje Release, wypycha tag i zleca OTA.
-`secrets.ota.json` pozostaje ignorowany i przechowuje dane MQTT. Stale
-`firmware_repo` zastepuje recznie zmieniany URL; skrypt aktualizuje to pole.
-Opcja `--publish-only` zatrzymuje sie przed komenda do ESP32. Gdy wydanie
-istnieje, skrypt sprawdza commit oraz hash publicznego obrazu i nie nadpisuje go.
-
-Workflow GitHub Actions jest alternatywa. Do samodzielnej publikacji wymaga
-wasnego fine-grained RELEASE_REPO_TOKEN; jesli lokalny skrypt opublikowal
-wydanie przed pushem tagu, workflow weryfikuje je bez sekretu.
-
-Prywatne repozytorium źródeł nie zapewnia publicznego URL do firmware.
-Obecny firmware nie uwierzytelnia pobrań z prywatnych GitHub Releases.
-Osobne publiczne repozytorium `led-korytarz-firmware` zawiera wyłącznie wydania.
-Zwykły commit i push źródeł nie publikuje obrazu. Publikację uruchamia dopiero
-tag wersji `vMAJOR.MINOR.PATCH` w prywatnym repozytorium źródeł.
-
-## Jednorazowe przygotowanie publikacji
-
-1. Publiczne repozytorium wydań musi mieć gałąź domyślną (jeżeli jest puste,
-   dodaj tam np. README). Nie kopiuj do niego źródeł ani sekretów.
-2. Utwórz fine-grained personal access token ograniczony **wyłącznie** do
-   `led-korytarz-firmware`, z uprawnieniem `Contents: Read and write` i krótką
-   datą ważności. Token `GITHUB_TOKEN` z repozytorium źródeł nie ma dostępu do
-   drugiego repozytorium.
-3. W prywatnym repozytorium źródeł dodaj token jako Actions secret o nazwie
-   `RELEASE_REPO_TOKEN`. Nie wklejaj tokenu do kodu, logów ani rozmowy.
-
-## Wydanie obrazu
-
-1. Ustaw `PROJECT_VER` w `CMakeLists.txt`, wykonaj testy i commit/push źródeł
-   razem z `.github/workflows/publish-firmware.yml`.
-2. Dopiero gdy wersja jest gotowa do testu sprzętowego, wypchnij tag, np.:
-
-   ```powershell
-   git tag -a v0.10.3 -m "Firmware 0.10.3"
-   git push origin v0.10.3
-   ```
-
-3. GitHub Actions uruchomi `check.sh`, zbuduje pełny profil OTA z przypiętego
-   `sdkconfig.esp32doit-devkit-v1`, sprawdzi wersję w obrazie i opublikuje w
-   publicznym Release `firmware.bin`, `release.json` i `SHA256SUMS`.
-   Istniejące wydanie nie jest nadpisywane. Sam Release **nie aktualizuje ESP32**.
-4. Sprawdź wynik Actions i trzy pliki w Release przed rozpoczęciem OTA.
-
-W `secrets.ota.json` wystarczy stala wartosc
-`"firmware_repo": "Daniel99999999999/led-korytarz-firmware"` oraz
-`"artifact_source": "release"` i `"publish_path": null`; zachowaj lokalne
-dane MQTT. Lokalny skrypt migruje starszy `firmware_url` automatycznie.
-Profil PlatformIO `esp32doit-devkit-v1-ota` -> Upload przebuduje lokalny
-obraz, sprawdzi zgodność **wersji** z Release, pobierze manifest i publiczny obraz,
-zweryfikuje jego rozmiar, SHA-256 i deskryptor ESP-IDF, a dopiero potem wyśle
-komendę MQTT. Obrazy z dwóch komputerów mogą mieć różne SHA mimo tych samych źródeł.
-
-Tryb `"artifact_source": "local"` (także domyślny przy braku pola) zachowuje
-poprzednią, ścisłą kontrolę SHA-256 obrazu lokalnego względem obrazu HTTPS.
-Nie stosuj trybu `release` dla niezweryfikowanego wydania. Test uruchomienia,
-rollbacku i sterowania lokalnego na ESP32 jest odrębnym krokiem HIL.
-
-Wydanie `v0.10.3` opublikowano skryptem lokalnym; tag zrodel wskazuje
-`177bd3f32a0ec70b13c40c467cfad48a2695c65d`, a GitHub Actions zakonczyl
-sie sukcesem. MQTT OTA z `0.10.2` poczatkowo zwrocilo ESP_ERR_HTTP_CONNECT:
-log pokazal mbedtls_ssl_setup -0x008D (brak pamieci na TLS). Po restarcie EN,
-przy zamknietym panelu HTTPS i wyslaniu komendy zaraz po reconnect MQTT,
-obraz pobrano do 100% i sterownik potwierdzil `idle/0.10.3/ESP_OK`.
-Dlugotrwala stabilnosc oraz test przyciskow wymagaja dalszej obserwacji.
-
-Wersja `0.10.1` z logu użytkownika restartuje się przez przepełnienie stosu main.
-Nie publikuj ani nie wgrywaj jej jako wydania. `0.10.2` uruchomiono na ESP32:
-działają HTTPS, zmiana hasła, Wi-Fi, MQTT i NTP; nie potwierdzono jeszcze
-długotrwałej stabilności ani marginesu stosu. Test sprzetowy potwierdzil
-przejscie OTA do `0.10.3`, ale nie pelne testy wszystkich funkcji sterownika.
-
+Alternatywa: workflow `.github/workflows/publish-firmware.yml` uruchamiany tagiem
+vMAJOR.MINOR.PATCH. Gdy Release juz istnieje, sprawdza go; do samodzielnej
+publikacji potrzebuje sekretu RELEASE_REPO_TOKEN z prawem Contents: write
+wylacznie do publicznego repozytorium firmware. Publikator lokalny nie wymaga
+tego sekretu Actions. Obie sciezki publikuja firmware.bin, release.json i SHA256SUMS.

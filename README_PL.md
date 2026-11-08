@@ -237,9 +237,17 @@ Stan jest publikowany retained pod `sterownik-led/<device-id>/ota/status` i poja
 
 Pobieranie odbywa się w osobnym zadaniu. Błąd sieci, TLS, obrazu albo zapisu pozostawia bieżący slot aktywny. Po udanej instalacji nowy obraz ma 10 s na stabilny start lokalnego kontrolera; reset lub watchdog przed zatwierdzeniem powoduje automatyczny powrót do poprzedniego slotu. OTA nie zastępuje Secure Boot: dostęp do brokera nadal należy ograniczyć silnym hasłem i zaufaną siecią.
 
-PlatformIO udostępnia środowisko `esp32doit-devkit-v1-ota`. Dziedziczy ono pełny `sdkconfig.esp32doit-devkit-v1`, dlatego kliknięcie Upload dla profilu OTA buduje ten sam zestaw funkcji co profil kablowy. Lokalna konfiguracja komputera znajduje się w ignorowanym pliku `secrets.ota.json`; wzór pól jest w `secrets.example.ota.json`. Uploader nie wymaga `paho-mqtt`: korzysta wyłącznie z biblioteki standardowej Pythona.
+Od 0.10.6 Upload profilu `esp32doit-devkit-v1-ota` kompiluje firmware,
+publikuje stabilny Release GitHub i zleca OTA przez MQTT, jesli broker jest
+osiagalny. Wymaga nowego PROJECT_VER, czystego main oraz Commit/Push.
+Build pozostaje lokalny. Profile USB i OTA dziedzicza ten sam sdkconfig.
+Dane MQTT sa w ignorowanym `secrets.ota.json`; do samej publikacji nie sa
+potrzebne. Publikator uzywa logowania Git Credential Manager.
 
-`firmware_url` musi wskazywać plik dostępny przez HTTPS z certyfikatem zaufanym przez firmware. Opcjonalny `publish_path` pozwala przed wysłaniem komendy atomowo skopiować bieżący `firmware.bin` do katalogu obsługiwanego przez lokalny serwer HTTPS. Skrypt pobiera plik z podanego URL-u i porównuje jego rozmiar oraz SHA-256 z aktualnym buildem, więc nie uruchomi OTA dla starego artefaktu. Następnie publikuje komendę QoS 1 przez MQTT i czeka, aż nowa wersja uruchomi się oraz wróci do stanu `idle`.
+Sterownik od 0.10.6 sam sprawdza stabilne wydania co 6 godzin + jitter,
+weryfikuje wersje/projekt/rozmiar/SHA-256 i instaluje nowsze bez HA/MQTT.
+Pierwsze wgranie tej funkcji wymaga dotychczasowej metody. Instrukcja:
+[AUTO_OTA_0.10.6.md](docs/AUTO_OTA_0.10.6.md).
 
 ## PIR
 
@@ -261,7 +269,10 @@ pio run -e esp32doit-devkit-v1-ota -t upload
 pio device monitor -b 115200
 ```
 
-Profil `esp32doit-devkit-v1` ma jawnie ustawione `upload_protocol = esptool`, `upload_port = COM4` i `monitor_port = COM4`. Build nie wymaga obecności portu, ale wgrywanie kablowe i monitor zakończą się błędem, dopóki płytka nie pojawi się jako COM4. Profil `esp32doit-devkit-v1-ota` nie używa portu COM; wymaga działających Wi-Fi, MQTT, serwera HTTPS oraz uzupełnionego lokalnego `secrets.ota.json`.
+Profil `esp32doit-devkit-v1` ma jawnie ustawione `upload_protocol = esptool`, `upload_port = COM4` i `monitor_port = COM4`. Build nie wymaga obecności portu, ale wgrywanie kablowe i monitor zakończą się błędem, dopóki płytka nie pojawi się jako COM4. Profil `esp32doit-devkit-v1-ota` nie uzywa portu COM. Upload wymaga Internetu
+i logowania GitHub; natychmiastowe zlecenie instalacji wymaga dodatkowo MQTT
+oraz secrets.ota.json. Bez brokera publikacja jest oddzielona od pozniejszej
+automatycznej instalacji przez firmware 0.10.6 lub nowszy.
 
 Projekt używa `board_build.partitions = partitions_ota_4mb.csv`: `ota_0` i `ota_1` mają po 1856 KiB. Pierwsze wgranie po przejściu z tabeli `factory` musi zaprogramować bootloader, nową tablicę partycji, początkowe dane OTA i aplikację. Nie używaj samego `firmware.bin` pod starym offsetem.
 

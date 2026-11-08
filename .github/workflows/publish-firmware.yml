@@ -82,5 +82,6 @@ jobs:
             .pio/release/release.json \
             .pio/release/SHA256SUMS \
             --repo Daniel99999999999/led-korytarz-firmware \
+            --latest \
             --title "$RELEASE_TAG" \
             --notes-file .pio/release/RELEASE_NOTES.md

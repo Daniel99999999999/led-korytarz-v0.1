@@ -1,81 +1,23 @@
-Aktualizacja firmware - trzy sposoby (przyklad: wersja 0.10.3)
+OTA - procedura od 0.10.6
 
-1. MQTT + HTTPS/GitHub: zdalnie, bez kabla i LCD; wymaga brokera
-   dostepnego dla komputera i ESP32 oraz internetu dla pobrania obrazu.
-2. Hotspot sterownika: lokalnie, bez brokera i internetu; wymaga LCD
-   do odczytania hasla, telefonu/laptopa oraz pliku firmware.bin.
-3. USB: programowanie przewodowe przez bootloader ESP32; metoda
-   awaryjna, nie jest OTA. Wymaga bezpiecznego odseparowania zasilania.
+1. Zmien PROJECT_VER w CMakeLists.txt albo uruchom:
+   python scripts/publish_ota.py --prepare-version --yes
+2. Sprawdz kod, wykonaj Commit i Push zrodel na main.
+3. W PlatformIO wybierz esp32doit-devkit-v1-ota -> Upload.
+   Build tylko kompiluje. Upload publikuje Release na GitHub i zleca OTA
+   przez MQTT, jesli broker jest osiagalny i istnieje secrets.ota.json.
+4. Poza siecia domowa Release zostaje opublikowany, a sterownik od 0.10.6
+   sam sprawdza aktualizacje co 6 h + 0-15 min. Brak dostepnego brokera
+   oznacza ODROCZONA instalacje, nie potwierdzony sukces instalacji.
+5. Pierwsze wgranie 0.10.6 wymaga dotychczasowego OTA/USB/AP.
+   Stary firmware nie sprawdza sam GitHub.
 
-SPOSOB 1 - MQTT + HTTPS/GitHub
-
-Z tego komputera caly sposob 1 wykonuje jeden skrypt (po commit i push
-zrodel), korzystajac z logowania zapisanego w Git Credential Manager:
-   & "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" scripts/publish_ota.py --mqtt-host 192.168.1.130
-Skrypt buduje profil OTA, publikuje Release, wypycha tag zrodel, sprawdza
-publiczny obraz i uruchamia OTA przez broker. Nie wymaga kopiowania tokenu
-GCM do GitHub Actions. Przy nastepnym wydaniu sam bierze nowy PROJECT_VER
-i wylicza URL; login/haslo MQTT pozostaja w secrets.ota.json. Opcja
---publish-only publikuje bez komendy OTA. Nie uruchamiaj dwoch kopii naraz.
-Zamknij karty panelu HTTPS ESP32 przed OTA z 0.10.2.
-
-Alternatywa: workflow GitHub Actions po pushu tagu. Wymaga jednorazowo
-ustawionego, wasko ograniczonego RELEASE_REPO_TOKEN; jesli lokalny skrypt
-opublikowal juz wydanie, workflow tylko je weryfikuje.
-
-Ponizsze szczegolowe kroki reczne dotycza tej alternatywy GitHub Actions.
-
-Jednorazowo na GitHub:
-1. Publiczne repo Daniel99999999999/led-korytarz-firmware musi miec
-   galaz domyslna. Jesli jest puste, dodaj w nim README.
-2. Utworz fine-grained personal access token: dostep tylko do repo
-   led-korytarz-firmware, uprawnienie Contents: Read and write.
-3. W PRYWATNYM repo zrodel led-korytarz-v0.1 dodaj ten token jako
-   Settings > Secrets and variables > Actions > New repository secret,
-   nazwa RELEASE_REPO_TOKEN. Nie zapisuj tokenu w kodzie ani tutaj.
-
-Kazde nowe wydanie (ponizej konkretnie 0.10.3):
-1. Sprawdz PROJECT_VER w CMakeLists.txt. Zrob commit i push zrodel.
-   Opis commitu moze brzmiec "0.10.3"; nie steruje on publikacja.
-2. W terminalu PowerShell w katalogu projektu utworz i wypchnij tag:
-      git tag -a v0.10.3 -m "Firmware 0.10.3"
-      git push origin v0.10.3
-   To TAG musi miec prefiks v i wskazywac commit z wersja 0.10.3.
-3. W prywatnym repo sprawdz Actions > Publish OTA firmware. Poczekaj
-   na zielony wynik. W publicznym repo otworz Releases > v0.10.3
-   i sprawdz firmware.bin, release.json oraz SHA256SUMS.
-   GitHub Actions wysyla te pliki automatycznie; nie wysylaj .bin recznie.
-   Nie uruchamiaj OTA, jezeli workflow lub Release sie nie powiodly.
-4. Lokalny skrypt sam ustawia w ignorowanym pliku secrets.ota.json:
-      "firmware_repo": "Daniel99999999999/led-korytarz-firmware",
-      "artifact_source": "release",
-      "publish_path": null,
-      "mqtt_host": "192.168.1.130"
-   Zachowaj poprawne lokalne mqtt_username, mqtt_password, mqtt_port,
-   topic_prefix=sterownik-led i device_id=sterownik_led_582abd7c8874.
-   Adres .130 dotyczy obecnego lokalnego brokera; przy innej sieci
-   wpisz adres brokera, z ktorym laczy sie ESP32.
-5. Upewnij sie, ze komputer laczy sie z brokerem, a ESP32 ma dostep do
-   tego brokera i do publicznego GitHub przez HTTPS. W PlatformIO wybierz
-   srodowisko esp32doit-devkit-v1-ota i kliknij Upload. Odpowiednik
-   z terminala PowerShell w katalogu projektu:
-      & "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32doit-devkit-v1-ota -t upload
-   Przed pierwszym OTA z 0.10.2 zamknij karty panelu HTTPS sterownika
-   i nie otwieraj ich podczas pobierania obrazu: sesje TLS zajmuja RAM.
-6. Uploader sprawdza Release, po czym sam wysyla adres obrazu do MQTT
-   na temat sterownik-led/sterownik_led_582abd7c8874/ota/set.
-   Mosquitto nie aktualizuje urzadzenia sam: przekazuje tylko komende;
-   ESP32 pobiera firmware.bin przez HTTPS, uruchamia go i potwierdza.
-   Czekaj na komunikat "wersja 0.10.3 uruchomiona i zatwierdzona".
-7. Sprawdz wersje i dzialanie lokalnego sterowania w panelu ESP32
-   https://192.168.1.50/ (lub przez UART). Pierwsze OTA 0.10.3 jest
-   testem sprzetowym: samo przejscie builda nie potwierdza aktualizacji.
-
-Przy kolejnym wydaniu zmien PROJECT_VER, wykonaj commit i push, po czym
-uruchom ten sam skrypt. Nie trzeba edytowac URL ani tagu recznie.
-Skrypt ma tez tryb "artifact_source": "local" dla wlasnego serwera
-HTTPS, ale wymaga zgodnego SHA-256 lokalnego i opublikowanego obrazu.
-Obecnie uzywamy trybu "release". Szczegoly: docs/GITHUB.md.
+Alternatywnie: python scripts/publish_ota.py
+Tylko publikacja, bez polecenia MQTT: dodaj --publish-only.
+UWAGA: auto-OTA nadal moze zainstalowac opublikowane wydanie.
+Ponowne zlecenie juz opublikowanej wersji: dodaj --install-only.
+Nie nadpisujemy wersji; zmieniony obraz wymaga nowego numeru.
+Szczegoly i testy: docs/AUTO_OTA_0.10.6.md, docs/GITHUB.md.
 
 SPOSOB 2 - lokalny hotspot z LCD (bez GitHub/MQTT)
 

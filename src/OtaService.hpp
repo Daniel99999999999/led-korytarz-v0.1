@@ -1,7 +1,9 @@
 #pragma once
 
+#include "AutoOtaModel.hpp"
 #include "OtaRequestValidator.hpp"
 #include "esp_err.h"
+#include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -11,6 +13,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+
+class WifiService;
 
 class OtaService final {
   public:
@@ -32,11 +36,14 @@ class OtaService final {
         std::uint32_t revision{0};
         std::uint8_t progress_percent{0};
         esp_err_t last_error{ESP_OK};
+        std::uint32_t auto_checks{0}, auto_last_check_s{0}, auto_next_check_s{0};
+        esp_err_t auto_error{ESP_OK};
+        bool auto_checking{false};
     };
 
     using StatusCallback = void (*)(void* context, const Status& status) noexcept;
 
-    OtaService() noexcept = default;
+    explicit OtaService(WifiService& wifi) noexcept : wifi_(wifi) {}
 
     esp_err_t initialize() noexcept;
     esp_err_t start() noexcept;
@@ -58,12 +65,23 @@ class OtaService final {
 
     struct Request {
         std::array<char, ota_request::kMaxUrlLength + 1U> url{};
+        bool automatic{false};
+        auto_ota::Manifest manifest{};
     };
 
     static void taskEntry(void* context) noexcept;
     [[noreturn]] void taskLoop() noexcept;
     esp_err_t validatePendingImage() noexcept;
     esp_err_t performUpdate(const Request& request) noexcept;
+    void checkAutomaticUpdate() noexcept;
+    esp_err_t fetchManifest(auto_ota::Manifest& manifest) noexcept;
+    static esp_err_t manifestEvent(esp_http_client_event_t* event) noexcept;
+    esp_err_t verifyAutomaticImage(const Request& request, int received) noexcept;
+    WifiService& wifi_;
+    std::array<char, auto_ota::kManifestLimit + 1> manifest_buffer_{};
+    bool manifest_redirect_secure_{false};
+    std::uint64_t next_auto_check_s_{0};
+    unsigned auto_failures_{0};
     void updateStatus(State state, std::uint8_t progress_percent, esp_err_t error,
                       const char* candidate_version = nullptr) noexcept;
     void publishCurrentStatus() noexcept;

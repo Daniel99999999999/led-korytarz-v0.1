@@ -1,3 +1,10 @@
+## 2026-11-08: 0.10.6 Upload GitHub i autonomiczne OTA
+
+Scalono publikatory, Upload profilu OTA publikuje oraz probuje komendy MQTT.
+Sterownik sprawdza stabilny manifest co 6 h + jitter, bez HA/MQTT.
+Szczegoly, ograniczenia i HIL: docs/AUTO_OTA_0.10.6.md.
+Nie publikowano ani nie flashowano w ramach implementacji.
+
 ## 2026-11-08: 0.10.5 diagnostyka I2C (lokalna)
 
 Dodano migawke LCD/DS1307 w WWW i log co 30 s. Szczegoly oraz testy HIL:

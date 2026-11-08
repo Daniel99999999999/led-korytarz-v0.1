@@ -94,7 +94,7 @@ $('version').textContent='Firmware '+value(s.version)+' · '+value(s.uptime_s)+'
 $('connection').textContent=s.wifi.state==='connected'?'Połączono':'Brak połączenia';
 block('wifi',[['Stan',s.wifi.state],['SSID',s.wifi.ssid],['IPv4',s.wifi.ip],['Sygnał',s.wifi.rssi===null?'-':s.wifi.rssi+' dBm'],['NTP',s.wifi.time]]);
 block('mqtt',[['Stan',s.mqtt.state],['Broker',s.mqtt.uri],['Połączenia',s.mqtt.connect_count],['Komendy',s.mqtt.accepted+'/'+s.mqtt.rejected],['Birth',s.mqtt.birth_queued?'w kolejce':'oczekuje'],['Subskrypcje',s.mqtt.subscriptions_done+'/'+s.mqtt.subscriptions_total+(s.mqtt.subscriptions_ready?' OK':'')],['Discovery',s.mqtt.discovery_confirmed?'PUBACK':(s.mqtt.discovery_queued?'w kolejce':'oczekuje')],['JSON',s.mqtt.discovery_bytes+' B'],['Outbox',s.mqtt.outbox_bytes+' B'],['Blad sync',s.mqtt.sync_error],['Kolejka',s.mqtt.backlog?'oczekuje':'pusta']]);
-block('system',[['OTA',s.ota.state],['Postęp',s.ota.progress+'%'],['EEPROM',s.settings?s.settings.eeprom:'-'],['Rekord',s.settings?s.settings.record:'-']]);
+block('system',[['OTA',s.ota.state],['Auto OTA',s.ota.auto_checking?'sprawdzanie':s.ota.auto_checks?'ostatni wynik: '+s.ota.auto_error:'oczekiwanie na siec/czas'],['Nastepne sprawdzenie',Math.max(0,s.ota.auto_next_check_s-s.uptime_s)+' s'],['Liczba sprawdzen',s.ota.auto_checks],['Postęp',s.ota.progress+'%'],['EEPROM',s.settings?s.settings.eeprom:'-'],['Rekord',s.settings?s.settings.record:'-']]);
 const h=s.hardware;
 block('hardware',h?[
 ['I2C kontroler',h.bus_initialized?'gotowy':'niezainicjalizowany'],
@@ -559,7 +559,12 @@ esp_err_t WebDiagnosticsService::status(httpd_req_t* request) {
     const auto ota_state = service.ota_.status();
     ok = addString(ota, "state", OtaService::stateName(ota_state.state)) &&
          addNumber(ota, "progress", ota_state.progress_percent) &&
-         addNumber(ota, "last_error", ota_state.last_error) && ok;
+         addNumber(ota, "last_error", ota_state.last_error) &&
+         addNumber(ota, "auto_checks", ota_state.auto_checks) &&
+         addNumber(ota, "auto_last_check_s", ota_state.auto_last_check_s) &&
+         addNumber(ota, "auto_next_check_s", ota_state.auto_next_check_s) &&
+         addBool(ota, "auto_checking", ota_state.auto_checking) &&
+         addString(ota, "auto_error", esp_err_to_name(ota_state.auto_error)) && ok;
     MqttService::Snapshot snapshot{};
     const bool snapshot_ready = service.mqtt_.tryGetSnapshot(snapshot);
     for (std::size_t index = 0; index < MqttService::kChannelCount; ++index) {

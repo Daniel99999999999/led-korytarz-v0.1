@@ -1,3 +1,4 @@
+#include "AutoOtaModel.hpp"
 #include "BacklightPolicy.hpp"
 #include "ButtonDebouncer.hpp"
 #include "ButtonGesture.hpp"
@@ -1973,7 +1974,51 @@ void testStackModel() noexcept {
     EXPECT_TRUE(r.severity() == stack_model::Level::critical);
 }
 
+void testAutoOtaPolicy() {
+    EXPECT_TRUE(auto_ota::newer("0.10.10", "0.10.9"));
+    EXPECT_TRUE(auto_ota::newer("1.0.0", "0.99.99"));
+    EXPECT_TRUE(!auto_ota::newer("0.10.4", "0.10.5"));
+    EXPECT_TRUE(!auto_ota::newer("0.10.5", "0.10.5"));
+    for (const char* bad :
+         {"v0.10.5", "0.10.5-rc1", "0.010.5", "0.10", "0.10.5.1", "4294967296.0.0", ""})
+        EXPECT_TRUE(!auto_ota::newer(bad, "0.0.0"));
+    EXPECT_EQ(900U, auto_ota::retrySeconds(1));
+    EXPECT_EQ(1800U, auto_ota::retrySeconds(2));
+    EXPECT_EQ(21600U, auto_ota::retrySeconds(6));
+    EXPECT_EQ(21600U, auto_ota::retrySeconds(100));
+    const char* json =
+        R"({"schema":1,"project":"led_controller","version":"0.10.5","tag":"v0.10.5","profile":"esp32doit-devkit-v1-ota","filename":"firmware.bin","size":512,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})";
+    auto_ota::Manifest result{};
+    EXPECT_TRUE(auto_ota::parseManifest(json, std::strlen(json), result));
+    EXPECT_EQ(512U, result.size);
+    EXPECT_EQ(0x01, result.sha256[0]);
+    EXPECT_EQ(0xef, result.sha256[31]);
+    EXPECT_TRUE(std::strcmp(result.version.data(), "0.10.5") == 0);
+    std::array<char, 2049> modified{};
+    auto mutate = [&](const char* find, const char* replacement) {
+        const char* position = std::strstr(json, find);
+        const auto prefix = static_cast<std::size_t>(position - json);
+        std::memcpy(modified.data(), json, prefix);
+        std::snprintf(modified.data() + prefix, modified.size() - prefix, "%s%s", replacement,
+                      position + std::strlen(find));
+        return auto_ota::parseManifest(modified.data(), std::strlen(modified.data()), result);
+    };
+    EXPECT_TRUE(!mutate("led_controller", "other_project"));
+    EXPECT_TRUE(!mutate("v0.10.5", "v0.10.6"));
+    EXPECT_TRUE(!mutate("512", "512.5"));
+    EXPECT_TRUE(!mutate("512", "999999999"));
+    EXPECT_TRUE(!mutate("firmware.bin", "other.bin"));
+    EXPECT_TRUE(!mutate("0123456789abcdef", "z123456789abcdef"));
+    EXPECT_TRUE(!mutate("\"schema\":1", "\"schema\":1,\"schema\":1"));
+    EXPECT_TRUE(!mutate("\"schema\":1", "\"schema\":{\"nested\":1}"));
+    EXPECT_TRUE(!mutate("}", "} garbage"));
+    EXPECT_TRUE(!auto_ota::parseManifest(json, std::strlen(json) - 1, result));
+    EXPECT_TRUE(!auto_ota::parseManifest(json, std::strlen(json) + 1, result));
+    EXPECT_TRUE(!auto_ota::parseManifest(json, 2049, result));
+}
+
 int main() {
+    testAutoOtaPolicy();
     testStackModel();
     testPwmConstraints();
     testPwmNvramMigration();
