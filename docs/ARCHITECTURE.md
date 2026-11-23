@@ -164,3 +164,18 @@ HTTPS przy przekierowaniach i najwyzej 5 przekierowan.
 Weryfikacja SHA-256 czyta nieaktywna partycje blokami 512 B przed finish.
 Nie zmieniono priorytetu ani stosu OTA; wymaga ponownego pomiaru HWM na ESP32.
 Interwaly, ograniczenia i testy: AUTO_OTA_0.10.6.md.
+
+## Diagnostyka DS1307 0.10.7
+
+Ds1307Nvram poprzedza load etapami probe, pointer i read_byte. Kazdy obieg
+wykonuje najwyzej jedna transakcje. Bledy zachowuja etap i stan do poprawnego
+odczytu rekordow lub verify. LcdService naklada status nvram_fault na status OK
+przy renderowaniu, bez modyfikacji stanu kontrolera i bez laczenia tego bledu
+z awaria samego LCD. Szczegoly: DS1307_DIAGNOSTICS_0.10.7.md.
+
+## Rotacja alarmow LCD - rozszerzenie 0.10.7
+
+LcdService sklada maske alarmow podczas renderowania i wybiera jeden tekst
+co 3 s przez LcdAlerts::Rotation. Nie tworzy zadania ani dodatkowych transakcji
+I2C. Stan OTA odczytuje tryGetStatus bez czekania. Alarmy nie zagluszaja siebie;
+serwisowy ekran lokalnego OTA pozostaje nadrzedny. Szczegoly LCD_ALERTS_0.10.7.md.

@@ -53,6 +53,7 @@ class OtaService final {
     esp_err_t setStatusCallback(StatusCallback callback, void* context) noexcept;
 
     [[nodiscard]] Status status() const noexcept;
+    bool tryGetStatus(Status& output) const noexcept;
     [[nodiscard]] static const char* stateName(State state) noexcept;
 
   private:

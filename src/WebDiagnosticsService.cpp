@@ -106,7 +106,7 @@ block('hardware',h?[
 ['NVRAM rekord',h['nvram.record_valid']?'poprawny':'brak poprawnego'],
 ['NVRAM zgodny z RAM',h['nvram.runtime_matches']?'tak':'nie'],
 ['NVRAM zapis oczekuje',h['nvram.save_pending']?'tak':'nie'],
-['NVRAM potwierdzone zapisy',h['nvram.saves']],['NVRAM ostatni blad',h['nvram.last_error']],
+['DS1307 ostatnia operacja',h['nvram.operation']],['DS1307 etap bledu',h['nvram.failed_operation']],['NVRAM potwierdzone zapisy',h['nvram.saves']],['NVRAM ostatni blad',h['nvram.last_error']],
 ['KEY1 maska RAM / NVRAM (3 = 1+2)',h['nvram.ram_key1']+' / '+h['nvram.saved_key1']],
 ['EEPROM ostatni blad',s.settings?s.settings.error:'wylaczony'],
 ['INA228',s.ina?(s.ina.present?'wykryty':'niewykryty')+'; '+s.ina.error:'wylaczony']
@@ -717,6 +717,10 @@ esp_err_t WebDiagnosticsService::status(httpd_req_t* request) {
         if (!append(",\"lcd_io.error\":%ld", static_cast<long>(hardware.lcd_io.error)))
             return unavailable(request, "Brak miejsca na diagnostyke");
         if (!append(",\"lcd_io.last_io_s\":%ld", static_cast<long>(hardware.lcd_io.last_io_s)))
+            return unavailable(request, "Brak miejsca na diagnostyke");
+        if (!append(",\"nvram.operation\":\"%s\",\"nvram.failed_operation\":\"%s\"",
+                    nvramOperationName(hardware.nvram.operation),
+                    nvramOperationName(hardware.nvram.failed_operation)))
             return unavailable(request, "Brak miejsca na diagnostyke");
         if (!append(",\"nvram.enabled\":%ld", static_cast<long>(hardware.nvram.enabled)))
             return unavailable(request, "Brak miejsca na diagnostyke");

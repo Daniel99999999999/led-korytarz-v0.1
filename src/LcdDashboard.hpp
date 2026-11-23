@@ -19,7 +19,12 @@ class LcdDashboard final {
         ok,
         fault,
         watchdog_reset,
+        nvram_fault,
     };
+
+    static constexpr Status withNvramFault(Status base, bool fault) noexcept {
+        return base == Status::ok && fault ? Status::nvram_fault : base;
+    }
 
     enum class InformationPage : std::uint8_t {
         status,

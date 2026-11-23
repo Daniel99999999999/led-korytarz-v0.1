@@ -93,10 +93,13 @@ void formatLastChannel(LcdDashboard::Line& line, const LcdDashboard::ChannelSnap
 void formatStatus(LcdDashboard::Line& line, const LcdDashboard::Status status) noexcept {
     switch (status) {
     case LcdDashboard::Status::ok:
-        copyPadded(line, "LOKALNIE: OK");
+        copyPadded(line, "STATUS: BEZ ALARMOW");
         break;
     case LcdDashboard::Status::fault:
         copyPadded(line, "LOKALNIE: BLAD");
+        break;
+    case LcdDashboard::Status::nvram_fault:
+        copyPadded(line, "DS1307: BLAD NVRAM");
         break;
     case LcdDashboard::Status::watchdog_reset:
         copyPadded(line, "RESET: WATCHDOG");

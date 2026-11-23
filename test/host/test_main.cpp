@@ -7,8 +7,10 @@
 #include "DebugDiscovery.hpp"
 #include "DeviceIdentity.hpp"
 #include "DutyTransition.hpp"
+#include "HardwareDiagnostics.hpp"
 #include "Ina228Scaling.hpp"
 #include "IrRemoteMapper.hpp"
+#include "LcdAlerts.hpp"
 #include "LcdDashboard.hpp"
 #include "LocalConfigRecord.hpp"
 #include "LocalControlDiscovery.hpp"
@@ -523,7 +525,7 @@ void testLcdDashboardLayout() noexcept {
     EXPECT_LINE("1:OFF100%  2:ON  61%", lines[0]);
     EXPECT_LINE("3:ON   1%  4:OFF 42%", lines[1]);
     EXPECT_LINE("5:ON 100%", lines[2]);
-    EXPECT_LINE("LOKALNIE: OK", lines[3]);
+    EXPECT_LINE("STATUS: BEZ ALARMOW", lines[3]);
 }
 
 void testLcdDashboardMeasurementField() noexcept {
@@ -655,6 +657,20 @@ void testLcdDashboardStatus() noexcept {
     lines = LcdDashboard::render(channels, LcdDashboard::Status::fault, 90'061, network, mqtt,
                                  LcdDashboard::InformationPage::uptime);
     EXPECT_LINE("LOKALNIE: BLAD", lines[3]);
+    using Status = LcdDashboard::Status;
+    EXPECT_EQ(Status::nvram_fault, LcdDashboard::withNvramFault(Status::ok, true));
+    EXPECT_EQ(Status::ok, LcdDashboard::withNvramFault(Status::ok, false));
+    EXPECT_EQ(Status::fault, LcdDashboard::withNvramFault(Status::fault, true));
+    EXPECT_EQ(Status::watchdog_reset, LcdDashboard::withNvramFault(Status::watchdog_reset, true));
+    LcdDashboard::NoticeSnapshot notice{};
+    notice.active = true;
+    std::strcpy(notice.text.data(), "NOTICE");
+    lines = LcdDashboard::render(channels, Status::nvram_fault, 90'061, network, mqtt,
+                                 LcdDashboard::InformationPage::uptime, notice);
+    EXPECT_LINE("DS1307: BLAD NVRAM", lines[3]);
+    lines = LcdDashboard::render(channels, LcdDashboard::withNvramFault(Status::ok, false), 90'061,
+                                 network, mqtt, LcdDashboard::InformationPage::status);
+    EXPECT_LINE("STATUS: BEZ ALARMOW", lines[3]);
 }
 
 void testLcdDashboardInformationRotation() noexcept {
@@ -2017,7 +2033,64 @@ void testAutoOtaPolicy() {
     EXPECT_TRUE(!auto_ota::parseManifest(json, 2049, result));
 }
 
+void testNvramDiagnosticRecovery() {
+    NvramDiagnostics data{};
+    data.operation = NvramOperation::read_record;
+    data.completeOperation(264, true);
+    EXPECT_EQ(264, data.last_error);
+    EXPECT_EQ(NvramOperation::read_record, data.failed_operation);
+    // Backoff and successful preflight must not falsely report full recovery.
+    data.completeOperation(0, false);
+    EXPECT_EQ(264, data.last_error);
+    for (auto stage : {NvramOperation::probe, NvramOperation::pointer, NvramOperation::read_byte}) {
+        data.operation = stage;
+        data.completeOperation(0, true);
+        EXPECT_EQ(264, data.last_error);
+        EXPECT_EQ(NvramOperation::read_record, data.failed_operation);
+    }
+    data.operation = NvramOperation::pointer;
+    data.completeOperation(263, true);
+    EXPECT_EQ(NvramOperation::pointer, data.failed_operation);
+    data.operation = NvramOperation::read_record;
+    data.completeOperation(0, true);
+    EXPECT_EQ(0, data.last_error);
+    EXPECT_EQ(NvramOperation::none, data.failed_operation);
+    data.operation = NvramOperation::verify;
+    data.completeOperation(265, true);
+    EXPECT_EQ(265, data.last_error);
+    data.completeOperation(0, true);
+    EXPECT_EQ(0, data.last_error);
+}
+
+void testLcdAlertRotation() {
+    using namespace lcd_alerts;
+    Rotation rotation;
+    const Mask mask = bit(Alert::local) | bit(Alert::nvram_read) | bit(Alert::wifi);
+    EXPECT_TRUE(std::strcmp(rotation.select(mask, 100), "STEROWANIE: BLAD") == 0);
+    EXPECT_TRUE(std::strcmp(rotation.select(mask, 102), "STEROWANIE: BLAD") == 0);
+    EXPECT_TRUE(std::strcmp(rotation.select(mask, 103), "DS1307: BLAD ODCZYTU") == 0);
+    EXPECT_TRUE(std::strcmp(rotation.select(mask, 106), "WIFI: ROZLACZONE") == 0);
+    EXPECT_TRUE(std::strcmp(rotation.select(mask, 109), "STEROWANIE: BLAD") == 0);
+    // Removing the visible alarm advances immediately; adding alarms does not starve others.
+    EXPECT_TRUE(std::strcmp(rotation.select(bit(Alert::wifi), 110), "WIFI: ROZLACZONE") == 0);
+    EXPECT_TRUE(rotation.select(0, 111) == nullptr);
+    EXPECT_TRUE(std::strcmp(rotation.select(bit(Alert::nvram_write), 112), "NVRAM: BLAD ZAPISU") ==
+                0);
+    Rotation wrap;
+    const auto near_wrap = std::numeric_limits<std::uint32_t>::max() - 1;
+    EXPECT_TRUE(std::strcmp(wrap.select(mask, near_wrap), "STEROWANIE: BLAD") == 0);
+    EXPECT_TRUE(std::strcmp(wrap.select(mask, 1), "DS1307: BLAD ODCZYTU") == 0);
+    for (const auto& text : kText)
+        EXPECT_TRUE(std::strlen(text) <= LcdDashboard::kColumnCount);
+    Rotation all;
+    const Mask every = (Mask{1} << kCount) - 1;
+    for (unsigned i = 0; i < kCount; ++i)
+        EXPECT_TRUE(std::strcmp(all.select(every, i * 3), kText[i]) == 0);
+}
+
 int main() {
+    testLcdAlertRotation();
+    testNvramDiagnosticRecovery();
     testAutoOtaPolicy();
     testStackModel();
     testPwmConstraints();

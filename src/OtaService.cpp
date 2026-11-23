@@ -616,3 +616,11 @@ void OtaService::checkAutomaticUpdate() noexcept {
     ESP_LOGI(kTag, "Auto OTA: wynik=%s; nastepna proba za %lu s (+ jitter)",
              esp_err_to_name(result), static_cast<unsigned long>(interval));
 }
+
+bool OtaService::tryGetStatus(Status& output) const noexcept {
+    MutexGuard lock(mutex_, 0);
+    if (!lock.locked())
+        return false;
+    output = status_;
+    return true;
+}

@@ -20,3 +20,6 @@ połączenia do istniejącej translacji I2C. Brak układu jest obsługiwany jako
 Uzgodniono noc z HA według słońca, czasowy priorytet przycisku LCD także przy Stale OFF
 oraz kontrolę DDRAM. Domyślny czas przycisku 120 s jest konfigurowalny w HA.
 Szczegóły w LCD_CONTROL.md; harmonogram lokalny/RTC nadal poza zakresem.
+
+2026-11-23: Pomiar napiecia i alarmy baterii DS1307 odlozone. PCB nie ma
+ukladu pomiarowego. Nie wnioskowac o baterii na podstawie bledow I2C/NVRAM.

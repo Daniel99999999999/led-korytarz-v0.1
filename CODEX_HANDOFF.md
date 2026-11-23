@@ -1,3 +1,16 @@
+## 2026-11-23: rozszerzenie 0.10.7 - rotacja alarmow LCD
+
+Wszystkie wykryte alarmy rotuja co 3 s; zwykle informacje wracaja po ich
+ustapieniu. Zrodla, ograniczenia i HIL: docs/LCD_ALERTS_0.10.7.md.
+Pomiar baterii DS1307 odlozony na wyrazne zyczenie uzytkownika.
+
+## 2026-11-23: 0.10.7 diagnostyka DS1307 i LCD
+
+Dodano niedestrukcyjny probe/pointer/read-byte przed combined read NVRAM.
+Etap bledu w WWW i logach; LCD pokazuje blad DS1307, ktorego dotad nie obejmowal.
+Szczegoly i test HIL: docs/DS1307_DIAGNOSTICS_0.10.7.md.
+Nie publikowano ani nie flashowano. Przyczyna NACK nadal wymaga logu ze sprzetu.
+
 ## 2026-11-08: 0.10.6 Upload GitHub i autonomiczne OTA
 
 Scalono publikatory, Upload profilu OTA publikuje oraz probuje komendy MQTT.

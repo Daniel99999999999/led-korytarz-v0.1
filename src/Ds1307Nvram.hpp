@@ -24,14 +24,25 @@ class Ds1307Nvram final {
                           TickType_t now) noexcept;
     NvramDiagnostics diagnostics_{};
     std::uint32_t io_seconds_{0};
-    enum class Phase : std::uint8_t { load, restore, idle, invalidate, write, commit, verify };
+    enum class Phase : std::uint8_t {
+        load,
+        restore,
+        idle,
+        invalidate,
+        write,
+        commit,
+        verify,
+        probe,
+        pointer,
+        read_byte
+    };
     esp_err_t write(std::uint8_t address, const std::uint8_t* data, std::size_t size) noexcept;
     esp_err_t read(std::uint8_t address, std::uint8_t* data, std::size_t size) noexcept;
     i2c_master_dev_handle_t device_{nullptr};
     local_control::Config stored_{};
     local_control::Config saving_{};
     local_control::Record record_{};
-    Phase phase_{Phase::load};
+    Phase phase_{Phase::probe};
     TickType_t retry_at_{0};
     TickType_t changed_at_{0};
     std::uint32_t observed_revision_{0};

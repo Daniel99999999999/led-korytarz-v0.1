@@ -37,6 +37,9 @@ class LedController final {
     void attachLocalOta(LocalOtaService& service) noexcept {
         local_ota_ = &service;
     }
+    void attachOtaService(OtaService& service) noexcept {
+        lcd_service_.attachOtaService(service);
+    }
     bool tryGetHardwareDiagnostics(HardwareDiagnostics& output) const noexcept {
         return lcd_service_.tryGetHardwareDiagnostics(output);
     }

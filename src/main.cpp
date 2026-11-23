@@ -60,6 +60,7 @@ extern "C" void app_main() {
     static OtaService ota_service(wifi_service);
     static LocalOtaService local_ota(ota_service);
     controller.attachLocalOta(local_ota);
+    controller.attachOtaService(ota_service);
     static MqttService mqtt_service(controller, ota_service, wifi_service);
 #if LED_CONTROLLER_AT24C08_ENABLED
     static SettingsService settings_service(wifi_service, mqtt_service);

@@ -14,9 +14,11 @@
 #include "Ina228.hpp"
 #include "Ina228Telemetry.hpp"
 #endif
+#include "LcdAlerts.hpp"
 #include "LcdDashboard.hpp"
 #include "LcdDisplay.hpp"
 #include "LocalControlConfig.hpp"
+#include "OtaService.hpp"
 #if LED_CONTROLLER_AT24C08_ENABLED
 #include "SettingsService.hpp"
 #endif
@@ -48,6 +50,9 @@ class LcdService final {
         std::uint32_t local_config_revision{0};
     };
 
+    void attachOtaService(OtaService& service) noexcept {
+        ota_service_ = &service;
+    }
     bool tryGetHardwareDiagnostics(HardwareDiagnostics& output) const noexcept;
     esp_err_t initialize() noexcept;
 #if LED_CONTROLLER_DS1307_NVRAM_ENABLED
@@ -96,6 +101,13 @@ class LcdService final {
     void markIna228Unavailable(esp_err_t error, bool present) noexcept;
 #endif
 
+    lcd_alerts::Mask collectAlerts(const Snapshot& snapshot) noexcept;
+    lcd_alerts::Rotation alert_rotation_{};
+    OtaService* ota_service_{nullptr};
+    OtaService::Status ota_cache_{};
+    bool heap_low_{false};
+    bool stack_low_{false};
+    std::uint64_t nvram_pending_since_{0};
     void publishHardwareDiagnostics() noexcept;
     HardwareDiagnostics hardware_{};
     HardwareDiagnostics published_hardware_{};

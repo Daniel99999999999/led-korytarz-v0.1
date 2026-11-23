@@ -5,10 +5,13 @@
 #if LED_CONTROLLER_INA228_ENABLED
 #include "Ina228Scaling.hpp"
 #endif
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <type_traits>
 
@@ -459,14 +462,31 @@ void LcdService::publishHardwareDiagnostics() noexcept {
                 }
 
                 if ((result == ESP_OK) && frame_due) {
-                    const LcdDashboard::Lines lines =
+                    auto display_status = latest_snapshot.status;
+#if LED_CONTROLLER_DS1307_NVRAM_ENABLED
+                    display_status = LcdDashboard::withNvramFault(
+                        display_status, nvram_.diagnostics().last_error != ESP_OK);
+#endif
+                    LcdDashboard::Lines lines =
                         latest_snapshot.service_active
                             ? latest_snapshot.service_lines
-                            : LcdDashboard::render(latest_snapshot.channels, latest_snapshot.status,
+                            : LcdDashboard::render(latest_snapshot.channels, display_status,
                                                    latest_snapshot.uptime_seconds,
                                                    latest_snapshot.network, latest_snapshot.mqtt,
                                                    information_page, latest_snapshot.notice,
                                                    latest_snapshot.measurement, measurement_page);
+                    if (!latest_snapshot.service_active) {
+                        const auto* alert = alert_rotation_.select(
+                            collectAlerts(latest_snapshot),
+                            static_cast<std::uint32_t>(latest_snapshot.uptime_seconds));
+                        if (alert) {
+                            lines[3].fill(' ');
+                            const auto length =
+                                std::min(std::strlen(alert), LcdDashboard::kColumnCount);
+                            std::memcpy(lines[3].data(), alert, length);
+                            lines[3][LcdDashboard::kColumnCount] = '\0';
+                        }
+                    }
                     result = display_.show(lines);
                     hardware_.lcd_io.record(
                         result, static_cast<std::uint32_t>(esp_timer_get_time() / 1000000));
@@ -757,3 +777,102 @@ void LcdService::markIna228Unavailable(const esp_err_t error, const bool present
     static_cast<void>(xSemaphoreGive(ina228_mutex_));
 }
 #endif
+
+lcd_alerts::Mask LcdService::collectAlerts(const Snapshot& snapshot) noexcept {
+    using lcd_alerts::Alert;
+    lcd_alerts::Mask mask = 0;
+    const auto add = [&](Alert alert, bool active) {
+        if (active)
+            mask |= lcd_alerts::bit(alert);
+    };
+    add(Alert::local, snapshot.status == LcdDashboard::Status::fault);
+    const auto reset = esp_reset_reason();
+    add(Alert::watchdog,
+        reset == ESP_RST_WDT || reset == ESP_RST_INT_WDT || reset == ESP_RST_TASK_WDT);
+    add(Alert::brownout, reset == ESP_RST_BROWNOUT);
+    add(Alert::panic, reset == ESP_RST_PANIC);
+    add(Alert::reset_unknown, reset == ESP_RST_UNKNOWN);
+#if LED_CONTROLLER_DS1307_NVRAM_ENABLED
+    const auto& nvram = nvram_.diagnostics();
+    if (nvram.last_error != ESP_OK) {
+        const auto stage = nvram.failed_operation;
+        add(Alert::nvram_address, stage == NvramOperation::probe);
+        const bool writing = stage == NvramOperation::invalidate ||
+                             stage == NvramOperation::write_payload ||
+                             stage == NvramOperation::commit || stage == NvramOperation::verify;
+        add(Alert::nvram_write, writing);
+        add(Alert::nvram_read, stage != NvramOperation::probe && !writing);
+    }
+    add(Alert::nvram_record, nvram.last_error == ESP_OK && !nvram.record_valid &&
+                                 static_cast<unsigned>(nvram.operation) >=
+                                     static_cast<unsigned>(NvramOperation::read_record));
+    if (!nvram.save_pending)
+        nvram_pending_since_ = 0;
+    else if (!nvram_pending_since_)
+        nvram_pending_since_ = snapshot.uptime_seconds;
+    add(Alert::nvram_pending,
+        nvram.save_pending && snapshot.uptime_seconds - nvram_pending_since_ >= 10);
+#endif
+    // Allow startup discovery, sensor conversion and network/time synchronization.
+    if (snapshot.uptime_seconds >= 30) {
+#if LED_CONTROLLER_AT24C08_ENABLED
+        if (settings_service_) {
+            const auto settings = settings_service_->status();
+            add(Alert::eeprom, settings.last_error != ESP_OK && !settings.save_pending &&
+                                   !settings.save_in_progress);
+            add(Alert::eeprom_write, settings.last_error != ESP_OK &&
+                                         (settings.save_pending || settings.save_in_progress));
+            add(Alert::eeprom_record, settings.storage_ready && !settings.record_found);
+            add(Alert::eeprom_apply, settings.record_found && !settings.record_applied);
+        }
+#endif
+        add(Alert::ina,
+            snapshot.measurement.current_supported && !snapshot.measurement.current_available);
+        add(Alert::radiator, snapshot.measurement.radiator_configured &&
+                                 !snapshot.measurement.radiator_temperature_available);
+        add(Alert::enclosure, snapshot.measurement.enclosure_configured &&
+                                  !snapshot.measurement.enclosure_temperature_available);
+        const bool wifi_config =
+            snapshot.network.state == LcdDashboard::NetworkState::unconfigured ||
+            snapshot.network.state == LcdDashboard::NetworkState::ready;
+        const bool mqtt_config = snapshot.mqtt.state == LcdDashboard::MqttState::unconfigured ||
+                                 snapshot.mqtt.state == LcdDashboard::MqttState::ready;
+        add(Alert::wifi_config, wifi_config);
+        add(Alert::mqtt_config, mqtt_config);
+        add(Alert::wifi,
+            !wifi_config && snapshot.network.state != LcdDashboard::NetworkState::connected);
+        add(Alert::mqtt_auth, snapshot.mqtt.state == LcdDashboard::MqttState::authentication_error);
+        add(Alert::mqtt, !mqtt_config &&
+                             snapshot.network.state == LcdDashboard::NetworkState::connected &&
+                             snapshot.mqtt.state != LcdDashboard::MqttState::connected &&
+                             snapshot.mqtt.state != LcdDashboard::MqttState::authentication_error);
+        add(Alert::mqtt_queue, snapshot.mqtt.publish_backlog);
+        add(Alert::ntp, snapshot.network.state == LcdDashboard::NetworkState::connected &&
+                            !snapshot.network.time_synchronized);
+    }
+    const auto free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free < 8192)
+        heap_low_ = true;
+    else if (free >= 12288)
+        heap_low_ = false;
+    add(Alert::heap, heap_low_);
+    const auto stacks = stack_monitor::summary();
+    const auto severity = stacks.record.severity();
+    if (stacks.complete)
+        stack_low_ =
+            severity == stack_model::Level::warning || severity == stack_model::Level::critical;
+    add(Alert::stack, stack_low_);
+    if (ota_service_) {
+        static_cast<void>(ota_service_->tryGetStatus(ota_cache_));
+        if (ota_cache_.revision == 0)
+            return mask;
+        add(Alert::ota, ota_cache_.state == OtaService::State::failed ||
+                            ota_cache_.state == OtaService::State::unavailable);
+        add(Alert::auto_ota, ota_cache_.auto_checks > 0 && ota_cache_.auto_error != ESP_OK);
+        add(Alert::updating, ota_cache_.state == OtaService::State::queued ||
+                                 ota_cache_.state == OtaService::State::downloading ||
+                                 ota_cache_.state == OtaService::State::verifying ||
+                                 ota_cache_.state == OtaService::State::rebooting);
+    }
+    return mask;
+}

@@ -1,5 +1,22 @@
 # Execution Plans
 
+## 2026-11-23 - rozszerzenie 0.10.7: rotacja alarmow LCD
+
+- [x] Model maski i rotacji alarmow co 3 s, staly bufor, bez alokacji.
+- [x] Zrodla: NVRAM/EEPROM, czujniki, siec, OTA, heap/stos, przyczyny resetu.
+- [x] check.sh, finalny pio run, testy rotacji/zawiniecia licznika, UTF-8/diff PASS; dokumentacja.
+- [ ] HIL LCD, recovery wielu alarmow i pomiar stosu. Bez publikacji/OTA.
+- [x] Brak pomiaru/oceny baterii DS1307 zgodnie z decyzja uzytkownika.
+
+## 2026-11-23 - 0.10.7 diagnostyka etapow DS1307 i status LCD
+
+- [x] Audyt: status LCD nie zawieral bledow DS1307 juz w 0.8.2.
+- [x] Probe, pointer, read byte, combined read; etap bledu w logu i WWW.
+- [x] Komunikat LCD bez zmiany priorytetu bledu ogolnego/watchdog i ekranu serwisowego.
+- [x] check.sh, testy hostowe/adaptery, UTF-8 i diff --check PASS; dokumentacja. Bez publikacji/OTA.
+- [ ] HIL: podlaczyc LCD, odczytac etap bledu DS1307.
+
+
 ## 2026-11-08 - Upload GitHub i autonomiczne OTA (0.10.6)
 
 - [ ] Scalanie publikatorow, Upload OTA publikuje; Build bez efektow sieciowych.
