@@ -1234,13 +1234,16 @@ bool MqttService::publishOtaStatus() noexcept {
         return false;
     }
 
-    std::array<char, 224> payload{};
+    std::array<char, 384> payload{};
     const int written = std::snprintf(
         payload.data(), payload.size(),
         "{\"state\":\"%s\",\"version\":\"%s\",\"candidate\":\"%s\","
-        "\"progress\":%u,\"error\":\"%s\"}",
+        "\"progress\":%u,\"error\":\"%s\",\"stage\":\"%s\",\"free_heap\":%lu,\"largest_block\":%"
+        "lu,\"http_status\":%d,\"tls_error\":%d}",
         OtaService::stateName(ota.state), ota.current_version.data(), ota.candidate_version.data(),
-        static_cast<unsigned>(ota.progress_percent), esp_err_to_name(ota.last_error));
+        static_cast<unsigned>(ota.progress_percent), esp_err_to_name(ota.last_error),
+        ota.stage.data(), static_cast<unsigned long>(ota.free_heap),
+        static_cast<unsigned long>(ota.largest_block), ota.http_status, ota.tls_error);
     if ((written < 0) || (static_cast<std::size_t>(written) >= payload.size())) {
         return false;
     }

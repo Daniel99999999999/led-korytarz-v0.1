@@ -1150,3 +1150,11 @@ obrazu OTA przez HTTPS. Brak nowego testu sprzetowego; 0.10.2 nadal ma
 powtarzajace sie bledy alokacji podczas nowych polaczen TLS.
 `check.sh`: UTF-8 157/157, skrypty wydania 6/6, CTest 2/2 i build bazowy PASS.
 Profil OTA: PASS, obraz 1 378 768 B, `led_controller/0.10.3`.
+
+
+## 2026-11-24: OTA 0.10.8
+
+Diagnostyka OTA w WWW/MQTT, logi KEY i opoznien probkowania, podswietlenie
+LCD oraz szybsza LED podczas instalacji. Szczegoly i pozostale HIL:
+[OTA_DIAGNOSTICS_0.10.8.md](docs/OTA_DIAGNOSTICS_0.10.8.md).
+Przyczyna awarii OTA i przyciskow nadal wymaga danych z urzadzenia.

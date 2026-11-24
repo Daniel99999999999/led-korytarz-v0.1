@@ -5,6 +5,7 @@
 #include "WifiService.hpp"
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -168,6 +169,12 @@ esp_err_t OtaService::beginLocalUpdate() noexcept {
     bool expected = false;
     if (!request_in_flight_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
         return ESP_ERR_INVALID_STATE;
+    {
+        MutexGuard lock(mutex_);
+        status_.http_status = 0;
+        status_.tls_error = 0;
+    }
+    recordStage("local_upload");
     updateStatus(State::downloading, 0, ESP_OK);
     return ESP_OK;
 }
@@ -281,11 +288,47 @@ esp_err_t OtaService::validatePendingImage() noexcept {
     return esp_ota_mark_app_valid_cancel_rollback();
 }
 
+esp_err_t OtaService::downloadEvent(esp_http_client_event_t* event) noexcept {
+    if (!event || !event->user_data)
+        return ESP_OK;
+    auto& service = *static_cast<OtaService*>(event->user_data);
+    if (event->event_id == HTTP_EVENT_ON_HEADER || event->event_id == HTTP_EVENT_DISCONNECTED) {
+        int tls = 0;
+        if (event->event_id == HTTP_EVENT_DISCONNECTED)
+            static_cast<void>(
+                esp_http_client_get_and_clear_last_tls_error(event->client, &tls, nullptr));
+        const int http = esp_http_client_get_status_code(event->client);
+        MutexGuard lock(service.mutex_);
+        if (http > 0)
+            service.status_.http_status = http;
+        if (tls != 0)
+            service.status_.tls_error = tls;
+    }
+    return ESP_OK;
+}
+
+void OtaService::recordStage(const char* stage) noexcept {
+    MutexGuard lock(mutex_);
+    copyText(status_.stage.data(), status_.stage.size(), stage);
+    status_.free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    status_.largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_LOGI(kTag, "OTA stage=%s heap=%lu largest=%lu", stage,
+             static_cast<unsigned long>(status_.free_heap),
+             static_cast<unsigned long>(status_.largest_block));
+}
+
 esp_err_t OtaService::performUpdate(const Request& request) noexcept {
     stack_monitor::Scope stack_sample(stack_monitor::Task::ota, kTaskStackSize);
     updateStatus(State::downloading, 0U, ESP_OK);
 
     esp_http_client_config_t http_config{};
+    {
+        MutexGuard lock(mutex_);
+        status_.http_status = 0;
+        status_.tls_error = 0;
+    }
+    http_config.event_handler = downloadEvent;
+    http_config.user_data = this;
     http_config.url = request.url.data();
     http_config.crt_bundle_attach = esp_crt_bundle_attach;
     http_config.timeout_ms = static_cast<int>(kHttpTimeoutMs);
@@ -298,18 +341,21 @@ esp_err_t OtaService::performUpdate(const Request& request) noexcept {
     ota_config.bulk_flash_erase = false;
 
     esp_https_ota_handle_t ota_handle = nullptr;
+    recordStage("https_begin");
     esp_err_t result = esp_https_ota_begin(&ota_config, &ota_handle);
     if (result != ESP_OK) {
         return result;
     }
 
     esp_app_desc_t candidate{};
+    recordStage("image_header");
     result = esp_https_ota_get_img_desc(ota_handle, &candidate);
     if (result != ESP_OK) {
         static_cast<void>(esp_https_ota_abort(ota_handle));
         return result;
     }
 
+    recordStage("image_validation");
     const esp_app_desc_t* const current = esp_app_get_description();
     if (std::strncmp(candidate.project_name, current->project_name,
                      sizeof(candidate.project_name)) != 0) {
@@ -332,6 +378,7 @@ esp_err_t OtaService::performUpdate(const Request& request) noexcept {
     ESP_LOGI(kTag, "Pobieranie firmware %.32s dla projektu %.32s", candidate.version,
              candidate.project_name);
 
+    recordStage("download");
     std::uint8_t last_progress = 0U;
     do {
         result = esp_https_ota_perform(ota_handle);
@@ -359,6 +406,7 @@ esp_err_t OtaService::performUpdate(const Request& request) noexcept {
     }
 
     if (request.automatic) {
+        recordStage("sha256");
         result = verifyAutomaticImage(request, esp_https_ota_get_image_len_read(ota_handle));
         if (result != ESP_OK) {
             static_cast<void>(esp_https_ota_abort(ota_handle));
@@ -366,6 +414,7 @@ esp_err_t OtaService::performUpdate(const Request& request) noexcept {
         }
     }
     updateStatus(State::verifying, 100U, ESP_OK, candidate.version);
+    recordStage("finish");
     result = esp_https_ota_finish(ota_handle);
     if (result != ESP_OK) {
         return result;
@@ -390,8 +439,20 @@ void OtaService::updateStatus(const State state, const std::uint8_t progress_per
             return;
         }
         status_.state = state;
+        updating_.store(state == State::queued || state == State::downloading ||
+                            state == State::verifying || state == State::rebooting,
+                        std::memory_order_release);
         status_.progress_percent = progress_percent;
         status_.last_error = error;
+        if (error != ESP_OK) {
+            status_.free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            status_.largest_block =
+                heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            ESP_LOGE(kTag, "OTA failed stage=%s error=%s heap=%lu largest=%lu",
+                     status_.stage.data(), esp_err_to_name(error),
+                     static_cast<unsigned long>(status_.free_heap),
+                     static_cast<unsigned long>(status_.largest_block));
+        }
         if (candidate_version != nullptr) {
             copyText(status_.candidate_version.data(), status_.candidate_version.size(),
                      candidate_version);

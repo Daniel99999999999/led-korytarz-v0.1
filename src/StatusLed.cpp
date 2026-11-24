@@ -28,11 +28,12 @@ esp_err_t StatusLed::initialize(const bool fault_latched, const std::uint32_t no
     return synchronize();
 }
 
-esp_err_t StatusLed::update(const std::uint32_t now) noexcept {
+esp_err_t StatusLed::update(const std::uint32_t now, const bool updating) noexcept {
     if (!initialized_) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    indicator_.setUpdating(updating, now);
     static_cast<void>(indicator_.update(now));
     return synchronize();
 }

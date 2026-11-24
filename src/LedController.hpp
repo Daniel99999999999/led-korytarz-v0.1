@@ -38,6 +38,7 @@ class LedController final {
         local_ota_ = &service;
     }
     void attachOtaService(OtaService& service) noexcept {
+        ota_service_ = &service;
         lcd_service_.attachOtaService(service);
     }
     bool tryGetHardwareDiagnostics(HardwareDiagnostics& output) const noexcept {
@@ -106,6 +107,7 @@ class LedController final {
     LcdService lcd_service_;
     Button lcd_backlight_button_;
     LocalOtaService* local_ota_{nullptr};
+    OtaService* ota_service_{nullptr};
     WifiService* wifi_service_{nullptr};
     MqttService* mqtt_service_{nullptr};
     BacklightPolicy backlight_policy_{};

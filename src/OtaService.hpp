@@ -36,6 +36,9 @@ class OtaService final {
         std::uint32_t revision{0};
         std::uint8_t progress_percent{0};
         esp_err_t last_error{ESP_OK};
+        std::array<char, 24> stage{};
+        std::uint32_t free_heap{0}, largest_block{0};
+        int http_status{0}, tls_error{0};
         std::uint32_t auto_checks{0}, auto_last_check_s{0}, auto_next_check_s{0};
         esp_err_t auto_error{ESP_OK};
         bool auto_checking{false};
@@ -52,6 +55,9 @@ class OtaService final {
     void finishLocalUpdate(esp_err_t result, const char* version) noexcept;
     esp_err_t setStatusCallback(StatusCallback callback, void* context) noexcept;
 
+    [[nodiscard]] bool isUpdating() const noexcept {
+        return updating_.load(std::memory_order_acquire);
+    }
     [[nodiscard]] Status status() const noexcept;
     bool tryGetStatus(Status& output) const noexcept;
     [[nodiscard]] static const char* stateName(State state) noexcept;
@@ -86,6 +92,8 @@ class OtaService final {
     void updateStatus(State state, std::uint8_t progress_percent, esp_err_t error,
                       const char* candidate_version = nullptr) noexcept;
     void publishCurrentStatus() noexcept;
+    void recordStage(const char* stage) noexcept;
+    static esp_err_t downloadEvent(esp_http_client_event_t* event) noexcept;
 
     mutable StaticSemaphore_t mutex_storage_{};
     mutable SemaphoreHandle_t mutex_{nullptr};
@@ -97,6 +105,7 @@ class OtaService final {
     StatusCallback status_callback_{nullptr};
     void* status_callback_context_{nullptr};
     std::atomic<bool> request_in_flight_{false};
+    std::atomic<bool> updating_{false};
     bool validation_pending_{false};
     bool initialized_{false};
     bool started_{false};

@@ -8,6 +8,7 @@ class StatusIndicator final {
 
     void reset(bool fault_latched, std::uint32_t now) noexcept;
     [[nodiscard]] bool update(std::uint32_t now) noexcept;
+    void setUpdating(bool updating, std::uint32_t now) noexcept;
     void latchFault() noexcept;
     void clearFault(std::uint32_t now) noexcept;
 
@@ -17,6 +18,7 @@ class StatusIndicator final {
   private:
     std::uint32_t toggle_interval_;
     std::uint32_t last_toggle_{0};
+    bool updating_{false};
     bool initialized_{false};
     bool fault_latched_{false};
     bool illuminated_{false};

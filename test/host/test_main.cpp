@@ -487,6 +487,25 @@ void testStatusIndicatorHeartbeat() noexcept {
     EXPECT_TRUE(indicator.isIlluminated());
 }
 
+void testStatusIndicatorOta() noexcept {
+    StatusIndicator indicator(500);
+    indicator.reset(true, 0);
+    indicator.setUpdating(true, 100);
+    EXPECT_TRUE(!indicator.update(349));
+    EXPECT_TRUE(indicator.update(350));
+    EXPECT_TRUE(!indicator.isIlluminated());
+    EXPECT_TRUE(indicator.isFaultLatched());
+    indicator.setUpdating(false, 400);
+    EXPECT_TRUE(indicator.isIlluminated());
+    EXPECT_TRUE(!indicator.update(1000));
+    indicator.clearFault(1000);
+    indicator.setUpdating(true, 1000);
+    EXPECT_TRUE(indicator.update(1250));
+    indicator.setUpdating(false, 1300);
+    EXPECT_TRUE(!indicator.update(1799));
+    EXPECT_TRUE(indicator.update(1800));
+}
+
 void testStatusIndicatorFaultLifecycle() noexcept {
     StatusIndicator indicator(500);
     indicator.reset(false, 0);
@@ -2136,6 +2155,7 @@ int main() {
     testDutyTransitionRetarget();
     testDutyTransitionTimeOverflow();
     testStatusIndicatorHeartbeat();
+    testStatusIndicatorOta();
     testStatusIndicatorFaultLifecycle();
     testLcdDashboardLayout();
     testLcdDashboardMeasurementField();

@@ -11,7 +11,7 @@ class StatusLed final {
     StatusLed(gpio_num_t pin, bool active_high, std::uint32_t toggle_interval) noexcept;
 
     esp_err_t initialize(bool fault_latched, std::uint32_t now) noexcept;
-    esp_err_t update(std::uint32_t now) noexcept;
+    esp_err_t update(std::uint32_t now, bool updating = false) noexcept;
     esp_err_t latchFault() noexcept;
     esp_err_t clearFault(std::uint32_t now) noexcept;
 

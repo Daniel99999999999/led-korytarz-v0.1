@@ -286,14 +286,23 @@ void LedController::taskEntry(void* const context) noexcept {
     const TickType_t interval = pdMS_TO_TICKS(board_config::kButtonPollIntervalMs);
     bool status_error_reported = false;
     bool watchdog_error_reported = false;
+    TickType_t last_slow_report = 0;
     for (;;) {
         stack_monitor::sample(stack_monitor::Task::led, kTaskStackSize);
         const TickType_t now = xTaskGetTickCount();
+        const TickType_t poll_gap = now - last_uptime_tick_;
+        if (poll_gap >= pdMS_TO_TICKS(100) && (now - last_slow_report) >= pdMS_TO_TICKS(10000)) {
+            ESP_LOGW(kTag, "KEY polling gap=%lu ms; OTA=%u",
+                     static_cast<unsigned long>(poll_gap * portTICK_PERIOD_MS),
+                     ota_service_ && ota_service_->isUpdating());
+            last_slow_report = now;
+        }
         uptime_ticks_ += static_cast<TickType_t>(now - last_uptime_tick_);
         last_uptime_tick_ = now;
 
         if (status_led_initialized_) {
-            const esp_err_t result = status_led_.update(static_cast<std::uint32_t>(now));
+            const esp_err_t result = status_led_.update(static_cast<std::uint32_t>(now),
+                                                        ota_service_ && ota_service_->isUpdating());
             if ((result != ESP_OK) && !status_error_reported) {
                 ESP_LOGE(kTag, "Blad aktualizacji LED statusu: %s", esp_err_to_name(result));
                 status_error_reported = true;
@@ -385,6 +394,11 @@ void LedController::handleButton(const std::size_t index, const Button::Event ev
     if (event == Button::Event::none) {
         return;
     }
+    if (event != Button::Event::long_press_step) {
+        ESP_LOGI(kTag, "KEY%u event=%u mask=%u", static_cast<unsigned>(index + 1),
+                 static_cast<unsigned>(event),
+                 static_cast<unsigned>(local_config_.button_masks[index]));
+    }
     if (event == Button::Event::long_press_ended) {
         for (std::size_t channel = 0; channel < leds_.size(); ++channel) {
             if (local_control::includes(gesture_masks_[index], channel)) {
@@ -403,11 +417,15 @@ void LedController::handleButton(const std::size_t index, const Button::Event ev
             }
         }
         if (mask == 0U) {
+            ESP_LOGW(kTag, "KEY%u ignored: disabled mapping or PWM fault",
+                     static_cast<unsigned>(index + 1));
             return;
         }
         // A second held button must not steal another gesture's outputs.
         for (std::size_t channel = 0; channel < leds_.size(); ++channel) {
             if (local_control::includes(mask, channel) && manual_dimming_active_[channel]) {
+                ESP_LOGW(kTag, "KEY%u ignored: channel %u owned by held button",
+                         static_cast<unsigned>(index + 1), static_cast<unsigned>(channel + 1));
                 return;
             }
         }
@@ -1144,8 +1162,8 @@ void LedController::serviceLcd(const TickType_t now) noexcept {
     }
     LcdDashboard::Lines service_screen{};
     const bool service_active = local_ota_ && local_ota_->screen(service_screen);
-    const esp_err_t backlight_result =
-        lcd_service_.requestBacklight(service_active || backlight_policy_.isOn());
+    const esp_err_t backlight_result = lcd_service_.requestBacklight(
+        service_active || (ota_service_ && ota_service_->isUpdating()) || backlight_policy_.isOn());
     if (backlight_result != ESP_OK) {
         handleLcdInternalFailure("ustawienie podswietlenia", backlight_result);
         return;

@@ -179,3 +179,11 @@ LcdService sklada maske alarmow podczas renderowania i wybiera jeden tekst
 co 3 s przez LcdAlerts::Rotation. Nie tworzy zadania ani dodatkowych transakcji
 I2C. Stan OTA odczytuje tryGetStatus bez czekania. Alarmy nie zagluszaja siebie;
 serwisowy ekran lokalnego OTA pozostaje nadrzedny. Szczegoly LCD_ALERTS_0.10.7.md.
+
+
+## 2026-11-24: OTA 0.10.8
+
+Diagnostyka OTA w WWW/MQTT, logi KEY i opoznien probkowania, podswietlenie
+LCD oraz szybsza LED podczas instalacji. Szczegoly i pozostale HIL:
+[OTA_DIAGNOSTICS_0.10.8.md](docs/OTA_DIAGNOSTICS_0.10.8.md).
+Przyczyna awarii OTA i przyciskow nadal wymaga danych z urzadzenia.

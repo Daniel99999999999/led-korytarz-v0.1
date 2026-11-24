@@ -1,0 +1,28 @@
+blueprint:
+  name: Sterownik LED - przyczyna bledu OTA
+  description: Pokazuje retained status bledu OTA jako powiadomienie w panelu HA.
+  domain: automation
+  input:
+    status_topic:
+      name: Dokladny temat MQTT ota/status sterownika
+      selector:
+        text: {}
+trigger:
+  - platform: mqtt
+    topic: !input status_topic
+condition:
+  - condition: template
+    value_template: "{{ trigger.payload_json is defined and trigger.payload_json.state == 'failed' }}"
+action:
+  - service: persistent_notification.create
+    data:
+      title: Blad aktualizacji sterownika LED
+      notification_id: sterownik_led_ota_error
+      message: >-
+        Blad: {{ trigger.payload_json.error | default('brak kodu') }}.
+        Etap: {{ trigger.payload_json.stage | default('starszy firmware - brak danych') }}.
+        HTTP: {{ trigger.payload_json.http_status | default('brak danych') }};
+        TLS: {{ trigger.payload_json.tls_error | default('brak danych') }}.
+        Wolny RAM: {{ trigger.payload_json.free_heap | default('brak danych') }} B;
+        najwiekszy blok: {{ trigger.payload_json.largest_block | default('brak danych') }} B.
+mode: single

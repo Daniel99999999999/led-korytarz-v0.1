@@ -435,3 +435,11 @@ wolny wewnetrzny RAM i najwiekszy blok przy odczycie statusu co najwyzej raz
 na minute. Nie zmieniono globalnych buforow TLS ani kodu OTA. Pelny
 `check.sh` i build profilu OTA PASS; dlugi test HTTPS oraz pierwsze OTA
 na sprzecie pozostaja do wykonania.
+
+
+## 2026-11-24: OTA 0.10.8
+
+Diagnostyka OTA w WWW/MQTT, logi KEY i opoznien probkowania, podswietlenie
+LCD oraz szybsza LED podczas instalacji. Szczegoly i pozostale HIL:
+[OTA_DIAGNOSTICS_0.10.8.md](docs/OTA_DIAGNOSTICS_0.10.8.md).
+Przyczyna awarii OTA i przyciskow nadal wymaga danych z urzadzenia.
